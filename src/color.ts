@@ -92,6 +92,11 @@ export function parseColor(input: string): RGB | null {
 
   if (s.startsWith('#')) {
     const hex = s.slice(1);
+    // Checked once, for every length. Only the six- and eight-digit branch used to
+    // validate, so `#ggg` produced NaN channels: every downstream comparison against NaN
+    // is false, so each guard that should have skipped the element fell through instead,
+    // and the tool reported "NaN:1" and offered to write `#NaNNaNNaN` into the file.
+    if (!/^[0-9a-f]+$/.test(hex)) return null;
     const expand = (ch: string): number => parseInt(ch + ch, 16);
     if (hex.length === 3 || hex.length === 4) {
       return {
@@ -103,7 +108,6 @@ export function parseColor(input: string): RGB | null {
     }
     if (hex.length === 6 || hex.length === 8) {
       const byte = (i: number): number => parseInt(hex.slice(i, i + 2), 16);
-      if (!/^[0-9a-f]+$/.test(hex)) return null;
       return {
         r: byte(0),
         g: byte(2),
@@ -197,10 +201,16 @@ export function relativeLuminance(c: RGB): number {
  * Composite a possibly-translucent colour over an opaque backdrop.
  * Contrast is only meaningful between opaque colours, so any alpha must be resolved
  * against something before the ratio means anything.
+ *
+ * The result is rounded to 8-bit channels because that is the only kind of colour that
+ * exists once the page is painted, and because the two halves of this tool have to agree
+ * to the last decimal: the fix verifier composites in memory, the checker re-reads the
+ * palette's hex, and four ramp swaps were offered at 4.50:1 that the checker then
+ * measured at 4.49:1 — a fix that does not fix, from a rounding difference alone.
  */
 export function flatten(fg: RGB, backdrop: RGB): RGB {
   if (fg.a >= 1) return fg;
-  const mix = (f: number, b: number): number => f * fg.a + b * (1 - fg.a);
+  const mix = (f: number, b: number): number => Math.round(f * fg.a + b * (1 - fg.a));
   return { r: mix(fg.r, backdrop.r), g: mix(fg.g, backdrop.g), b: mix(fg.b, backdrop.b), a: 1 };
 }
 

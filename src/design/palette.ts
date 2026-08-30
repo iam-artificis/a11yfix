@@ -2,7 +2,7 @@ import type { Element, ParsedMarkup } from '../parse/markup.js';
 import { getAttr } from '../parse/markup.js';
 import { asSimpleSelector, isBoldWeight, lengthToPx, parseCss, parseInlineStyle, relativeFontFactor } from '../parse/css.js';
 import type { CssRule, Declaration } from '../parse/css.js';
-import { resolveTailwindClasses } from './tailwind.js';
+import { resolveTailwindClasses, resolveTailwindColor } from './tailwind.js';
 import { flatten, parseColor, toHex } from '../color.js';
 import type { RGB } from '../color.js';
 import type { TailwindDecl } from './tailwind.js';
@@ -41,6 +41,15 @@ export interface ResolvedColor {
   readonly span?: { readonly start: number; readonly end: number; readonly file: string };
   /** The Tailwind class that produced it, when applicable, so a fix can swap the shade. */
   readonly tailwindClass?: string;
+  /**
+   * What sits behind this layer, when the layer itself is translucent.
+   *
+   * `value` is the composited result — the colour a viewer sees — which is the right
+   * answer for measuring contrast and the wrong one for changing it. A fix that swaps
+   * `bg-red-600/60` for a darker shade writes a colour that will composite over the
+   * backdrop again, so verifying it needs the backdrop, not the old composite.
+   */
+  readonly behind?: string;
 }
 
 export interface Typography {
@@ -234,7 +243,9 @@ export class Palette {
           provenance: 'tailwind',
           from: el,
           span: { start: classAttr.valueStart, end: classAttr.valueEnd, file: this.file },
-          ...(findClass(classes, 'text-') !== undefined ? { tailwindClass: findClass(classes, 'text-') as string } : {}),
+          ...(colourClass(classes, 'text-') !== undefined
+            ? { tailwindClass: colourClass(classes, 'text-') as string }
+            : {}),
         };
       }
       if (tw.background !== undefined && classAttr !== undefined) {
@@ -243,7 +254,9 @@ export class Palette {
           provenance: 'tailwind',
           from: el,
           span: { start: classAttr.valueStart, end: classAttr.valueEnd, file: this.file },
-          ...(findClass(classes, 'bg-') !== undefined ? { tailwindClass: findClass(classes, 'bg-') as string } : {}),
+          ...(colourClass(classes, 'bg-') !== undefined
+            ? { tailwindClass: colourClass(classes, 'bg-') as string }
+            : {}),
         };
       }
       if (tw.backgroundUnknown === true && tw.background === undefined) out.backgroundUnknown = true;
@@ -406,13 +419,22 @@ export class Palette {
     if (stack.length === 0 && opaqueLayer !== undefined) {
       return { ...opaqueLayer, value: toHex(base) };
     }
+    // Everything below the topmost layer, kept separately: it is the backdrop a
+    // replacement for that layer would be painted on.
     let acc = base;
-    for (let i = stack.length - 1; i >= 0; i--) acc = flatten(stack[i] as RGB, acc);
+    for (let i = stack.length - 1; i >= 1; i--) acc = flatten(stack[i] as RGB, acc);
+    const behind = stack.length > 0 ? toHex(acc) : undefined;
+    if (stack.length > 0) acc = flatten(stack[0] as RGB, acc);
     // The span and Tailwind class come from the topmost layer, because that is the
     // declaration a developer would edit to change what they see.
     const anchor = topmost ?? opaqueLayer;
     if (anchor === undefined) return { value: toHex(acc), provenance: 'composited', from: this.markup.elements[0] as Element };
-    const out: ResolvedColor = { ...anchor, value: toHex(acc), provenance: 'composited' };
+    const out: ResolvedColor = {
+      ...anchor,
+      value: toHex(acc),
+      provenance: 'composited',
+      ...(behind !== undefined ? { behind } : {}),
+    };
     return out;
   }
 
@@ -487,6 +509,29 @@ function parseSheet(sheet: StylesheetSource): ReturnType<typeof parseCss> {
 
 function findClass(classes: readonly string[], prefix: string): string | undefined {
   return classes.find((c) => c.startsWith(prefix) && !c.includes(':'));
+}
+
+/**
+ * The `text-`/`bg-` class that actually set a colour.
+ *
+ * Not the first one with the prefix: `text-` also prefixes every font-size utility, and
+ * prettier-plugin-tailwindcss sorts sizes before colours, so `class="text-sm
+ * text-gray-400"` — the commonest way it is written — handed `text-sm` to the fix
+ * builder. That has no family or shade, so the builder gave up and the finding was
+ * downgraded to "the colour is not written in a form this tool can rewrite in place",
+ * which was untrue: it is written right there as `text-gray-400`.
+ *
+ * Falls back to the first prefixed class so an arbitrary-value utility the resolver does
+ * not understand still names something rather than nothing.
+ */
+function colourClass(classes: readonly string[], prefix: string): string | undefined {
+  const resolved = classes.find(
+    (c) =>
+      c.startsWith(prefix) &&
+      !c.includes(':') &&
+      resolveTailwindColor(c.slice(prefix.length).replace(/\/.*$/, '')) !== undefined,
+  );
+  return resolved ?? findClass(classes, prefix);
 }
 
 /** `position: absolute|fixed` plus offsets that stretch the element over its parent. */

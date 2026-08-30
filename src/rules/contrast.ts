@@ -152,7 +152,7 @@ interface ColourEdit {
 function buildEdit(
   source: ResolvedColor,
   newHex: string,
-  against: { r: number; g: number; b: number; a: number },
+  verify: (candidate: RGB) => number,
   required: number,
   wholeSource: string,
   label: string,
@@ -184,7 +184,7 @@ function buildEdit(
       if (resolvedRgb === null) continue;
       // Offering a fix that does not fix is worse than offering none: the violation
       // looks handled and nobody checks it again.
-      const achieved = contrastRatio(flatten(resolvedRgb, against), against);
+      const achieved = verify(resolvedRgb);
       if (achieved < required) continue;
 
       const raw = wholeSource.slice(span.start, span.end);
@@ -209,7 +209,7 @@ function buildEdit(
 
   const direct = parseColor(newHex);
   if (direct === null) return null;
-  const achieved = contrastRatio(flatten(direct, against), against);
+  const achieved = verify(direct);
   // The same guard the Tailwind branch above applies, for the same reason: a fix that
   // does not fix is worse than no fix, because the violation looks handled and nobody
   // looks at it again. This branch used to trust the solver's own arithmetic; it had a
@@ -271,15 +271,34 @@ const textContrast: Rule = {
           ? ''
           : ' Font size was not determinable here, so the 16px browser default was assumed.';
 
+      /**
+       * The ratio a candidate for the moving side would really render at.
+       *
+       * A Tailwind swap lands on a palette step and keeps the opacity modifier it found,
+       * so the candidate can be translucent even when the colour the solver proved was
+       * opaque. Two things then have to be true that are easy to get wrong: a candidate
+       * *background* composites over the backdrop, not over the text sitting on it, and
+       * a translucent foreground re-composites over the new background rather than
+       * staying at the value it had over the old one. Verifying `bg-red-600/60` inside
+       * `bg-white` against the text blended it with the text: 4.50:1 promised, 4.31:1
+       * rendered, and the finding closed.
+       */
+      const backdrop = (pair.bg.behind !== undefined ? parseColor(pair.bg.behind) : null) ?? bgOpaque;
+      const verify = (candidate: RGB): number => {
+        if (repair?.moved === 'background') {
+          const effective = flatten(candidate, backdrop);
+          return contrastRatio(flatten(pair.fgRgb, effective), effective);
+        }
+        return contrastRatio(flatten(candidate, bgOpaque), bgOpaque);
+      };
+
       let fix: Violation['fix'];
       if (repair !== null) {
         const target = repair.moved === 'foreground' ? pair.fg : pair.bg;
         const newHex = toHex(repair.color);
-        // When the background moves, the thing it must contrast against is the text.
-        const against = repair.moved === 'foreground' ? bgOpaque : fgFlat;
         const built = repair.disruptive
           ? null
-          : buildEdit(target, newHex, against, required, ctx.source, 'raise contrast');
+          : buildEdit(target, newHex, verify, required, ctx.source, 'raise contrast');
         if (built !== null) {
           const edit = built.edit;
           // Describe the edit that will actually be written. When the patch swaps a
@@ -414,9 +433,16 @@ const linkColorOnly: Rule = {
       const classAttr = getAttr(el, 'class') ?? getAttr(el, 'className');
       const classes = classAttr?.value ?? '';
       const style = getAttr(el, 'style')?.value ?? '';
+      // `no-underline` and `decoration-none` are underline *removals*, and the cue test
+      // below is a substring match — "no-underline" contains "underline", and
+      // "decoration-none" contains "decoration". Both therefore read as cues, the rule
+      // skipped every element it exists to catch, and the Tailwind half of A11Y-COLOR-003
+      // was unreachable code. Dropping the removal tokens first keeps a genuine cue
+      // alongside one (`no-underline border-b-2`) working.
+      const cueClasses = classes.replace(/\b(?:no-underline|decoration-none)\b/g, ' ');
       // An underline, a border, or a weight change all count as a non-colour cue.
       const hasNonColourCue =
-        /underline|border-b|decoration|font-(bold|semibold|medium)/.test(classes) ||
+        /underline|border-b|decoration|font-(bold|semibold|medium)/.test(cueClasses) ||
         /text-decoration\s*:\s*(?!none)/i.test(style) ||
         /border-bottom/i.test(style);
       if (hasNonColourCue) continue;

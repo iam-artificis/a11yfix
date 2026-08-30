@@ -165,3 +165,74 @@ test('repairContrast returns the colour it verified, not one wearing its alpha',
     `reported ${repair.ratio.toFixed(2)}:1 but the colour measures ${measured.toFixed(2)}:1`,
   );
 });
+
+/**
+ * A Tailwind background swap keeps the opacity modifier it found, so the replacement is
+ * translucent even when the colour the solver proved was opaque. Verifying it needs two
+ * things the first version got wrong: the candidate composites over the *backdrop*, not
+ * over the text sitting on it, and the text then re-composites over the result.
+ *
+ * A sweep over the ramps found 72 pairs where the tool named a shade, quoted a ratio, and
+ * the patched file measured below AA — the exact failure this file exists to prevent,
+ * arriving through the Tailwind path instead of the CSS one.
+ */
+
+const tw = (classes) =>
+  `<html lang="en"><head><title>t</title></head><body>` +
+  `<div class="bg-white"><p style="font-size:16px" class="${classes}">Warning message here</p></div>` +
+  `</body></html>`;
+
+const contrastIn = (source) =>
+  analyse('p.html', source).violations.filter((v) => v.ruleId === 'A11Y-COLOR-001');
+
+test('a translucent background is verified against the backdrop, not against the text', () => {
+  const source = tw('bg-red-600/60 text-yellow-100');
+  const [v] = contrastIn(source);
+  assert.ok(v !== undefined, 'red-600 at 60% over white should fail AA under pale yellow');
+  if (v.fix?.edits?.length) {
+    // The old answer was bg-red-950/60 "reaching 4.50:1", which renders at 4.32:1: the
+    // candidate had been blended with the yellow text instead of with the white div.
+    const patched = analyse('p.html', source).fixedSource;
+    assert.deepEqual(
+      contrastIn(patched),
+      [],
+      `patched to "${v.fix.description}" and it still fails`,
+    );
+  }
+});
+
+test('no Tailwind shade swap leaves the text below AA', () => {
+  const families = ['red', 'blue', 'green', 'gray', 'slate', 'yellow', 'purple', 'orange'];
+  const broken = [];
+  for (const bgFamily of families) {
+    for (const bgShade of [500, 600, 700, 800, 900]) {
+      for (const alpha of ['', '/60', '/80']) {
+        for (const textFamily of families) {
+          for (const textShade of [100, 300, 500]) {
+            const classes = `bg-${bgFamily}-${bgShade}${alpha} text-${textFamily}-${textShade}`;
+            const source = tw(classes);
+            const [v] = contrastIn(source);
+            if (v?.fix?.edits?.length === undefined || v.fix.edits.length === 0) continue;
+            const patched = analyse('p.html', source).fixedSource;
+            if (contrastIn(patched).length > 0) broken.push(`${classes}: ${v.fix.description}`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(broken.slice(0, 5), [], `${broken.length} swaps did not reach the ratio quoted`);
+});
+
+test('compositing lands on a colour that exists', () => {
+  // The checker measures the palette's hex; the fix verifier composited in floating
+  // point. Four ramp swaps were offered at "4.50:1" and measured at 4.49:1 afterwards —
+  // a fix that does not fix, from nothing but a rounding difference between the halves.
+  const mixed = flatten({ r: 30, g: 64, b: 175, a: 0.8 }, { r: 255, g: 255, b: 255, a: 1 });
+  for (const channel of ['r', 'g', 'b']) {
+    assert.equal(
+      mixed[channel],
+      Math.round(mixed[channel]),
+      `${channel} came back as ${mixed[channel]}, which no screen can show`,
+    );
+  }
+});
