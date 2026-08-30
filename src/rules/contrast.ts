@@ -93,10 +93,22 @@ function hasOwnText(el: Element): boolean {
   if (NON_TEXT_TAGS.has(el.tagLower)) return false;
   // Only count text that is not entirely inside a child element, so a wrapper <div>
   // is not blamed for the contrast of a <span> that sets its own colour.
-  const withoutChildren = el.children.reduce(
-    (src, child) => src.replace(src.slice(child.openStart - el.openEnd, child.end - el.openEnd), ''),
-    el.innerSource,
-  );
+  //
+  // Walk the gaps between children rather than deleting each child from the string. The
+  // deleting version computed offsets against the original innerSource and applied them
+  // to an accumulator that had already shrunk, so from the second child onward it cut
+  // the wrong range — or, more often, an empty one, leaving every child's text behind.
+  let kept = '';
+  let cursor = 0;
+  for (const child of el.children) {
+    const start = child.openStart - el.openEnd;
+    const stop = child.end - el.openEnd;
+    // Guarded rather than assumed sorted: the parser is deliberately tolerant of
+    // malformed markup, and overlapping siblings would otherwise reintroduce the bug.
+    if (start > cursor) kept += el.innerSource.slice(cursor, start);
+    if (stop > cursor) cursor = stop;
+  }
+  const withoutChildren = kept + el.innerSource.slice(cursor);
   const own = withoutChildren.replace(/<[^>]*>/g, ' ');
   const literal = own.replace(/\{[^}]*\}/g, ' ').trim();
   if (literal !== '') return !SEPARATOR_ONLY.test(literal);

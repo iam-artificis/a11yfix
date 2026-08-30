@@ -21,6 +21,42 @@ const run = (file, source, opts = {}) =>
 
 const contrastFindings = (result) => result.violations.filter((v) => v.ruleId.startsWith('A11Y-COLOR'));
 
+test('a wrapper is not blamed for text that lives in its children', () => {
+  // The single commonest shape in real markup: a muted wrapper whose children set their
+  // own colour. hasOwnText removed each child from innerSource by computing its slice
+  // against the original offsets and applying it to an accumulator that had already
+  // shrunk, so from the second child onward it cut the wrong range — usually an empty
+  // one. With one child it worked; with two the wrapper kept all their text and was
+  // reported at the wrapper's colour, which nothing renders in.
+  const two = `<html lang="en"><head><title>t</title></head><body><main><h1>h</h1>
+  <div style="color:#bbbbbb;background:#ffffff"><span style="color:#000000">a</span><span style="color:#000000">b</span></div>
+  </main></body></html>`;
+  assert.equal(contrastFindings(run('page.html', two)).length, 0);
+
+  // Three children, the version that used to leave the most text behind.
+  const three = `<html lang="en"><head><title>t</title></head><body><main><h1>h</h1>
+  <div class="text-gray-300 bg-white"><span class="text-black">a</span><span class="text-black">b</span><span class="text-black">c</span></div>
+  </main></body></html>`;
+  assert.equal(contrastFindings(run('page.html', three)).length, 0);
+});
+
+test('a wrapper with text of its own is still reported', () => {
+  // The other half of the property: dropping child text must not drop the parent's.
+  const source = `<html lang="en"><head><title>t</title></head><body><main><h1>h</h1>
+  <div style="color:#bbbbbb;background:#ffffff">Filed under <span style="color:#000000">news</span> and <span style="color:#000000">sport</span></div>
+  </main></body></html>`;
+  const found = contrastFindings(run('page.html', source));
+  assert.equal(found.length, 1, 'the wrapper renders "Filed under" at its own colour');
+  assert.match(found[0].message, /#bbbbbb/);
+});
+
+test('text after the last child still counts as the parent\'s', () => {
+  const source = `<html lang="en"><head><title>t</title></head><body><main><h1>h</h1>
+  <div style="color:#bbbbbb;background:#ffffff"><span style="color:#000000">a</span> trailing words</div>
+  </main></body></html>`;
+  assert.equal(contrastFindings(run('page.html', source)).length, 1);
+});
+
 test('a translucent background is composited, not read as solid', () => {
   // shadcn-ui/ui, registry/bases/*/examples/table-example.tsx: a status pill written as
   // `bg-green-500/10 text-green-700`. Reading the background as solid green-500 made it
