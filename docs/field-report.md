@@ -96,9 +96,12 @@ Stated plainly, because a report that only lists successes is not a measurement.
   `href="#"`, nearly all placeholders in example files. The claim is true and the priority
   was not, so a placeholder with no handler is now `info` and not listed by default. It is
   still a large fraction of the total count.
-- **Vue and Svelte are parsed as HTML.** `<script setup>`, reactive expressions and
-  framework-specific directives are not understood. Findings in those files are limited to
-  what plain markup analysis can see.
+- **Vue and Svelte are handled as markup, not by their own compilers.** In practice this
+  works better than it sounds: `@click` and `on:click` are recognised as handlers,
+  `{#if}` blocks and `<script>` contents are not mistaken for markup, and Tailwind
+  classes resolve normally. What is missed is anything only the framework compiler knows —
+  scoped-style specificity, `v-bind` objects, slot content, and props threaded through a
+  component boundary.
 - **The cascade is not evaluated.** Media queries, container queries, `:hover`, dark mode
   and any colour behind a runtime expression are skipped rather than guessed. On a
   codebase built entirely on design tokens resolved at runtime, the contrast rules will

@@ -301,3 +301,66 @@ test('a fix is only offered when a palette step really clears the threshold', ()
     }
   }
 });
+
+test('a Vue single-file component is understood, not just tolerated', () => {
+  const sfc = `<script setup lang="ts">
+const html = "<div>not markup</div>";
+</script>
+
+<template>
+  <div class="bg-white p-6">
+    <p class="text-gray-400">Muted copy.</p>
+    <div @click="toggle" class="cursor-pointer">Toggle</div>
+    <input v-model="q" placeholder="Search products" />
+  </div>
+</template>`;
+  const ids = new Set(run('Card.vue', sfc).violations.map((v) => v.ruleId));
+  assert.ok(ids.has('A11Y-COLOR-001'), 'Tailwind colours inside <template> must resolve');
+  assert.ok(ids.has('A11Y-KBD-002'), '@click must be recognised as a handler');
+  assert.ok(ids.has('A11Y-FORM-002'), 'a placeholder-only label must be found');
+  // Markup inside the <script> block is a string, not part of the component.
+  assert.equal(
+    run('Card.vue', sfc).violations.filter((v) => v.line <= 3).length,
+    0,
+    'nothing in the script block is markup',
+  );
+});
+
+test('a Svelte component is understood, not just tolerated', () => {
+  const svelte = `<script lang="ts">
+  const html = "<div>not markup</div>";
+</script>
+
+<div class="bg-white p-6">
+  <img src="/logo.png" />
+  <div on:click={() => (open = !open)}>Toggle</div>
+  {#if open}
+    <p class="text-gray-400">Muted copy.</p>
+  {/if}
+</div>`;
+  const ids = new Set(run('Card.svelte', svelte).violations.map((v) => v.ruleId));
+  assert.ok(ids.has('A11Y-IMG-001'));
+  assert.ok(ids.has('A11Y-KBD-002'), 'on:click must be recognised as a handler');
+  assert.ok(ids.has('A11Y-COLOR-001'), 'markup inside {#if} must still be analysed');
+});
+
+test('a stylesheet is parsed once per run, not once per file', () => {
+  // Parsing in the Palette constructor meant 70 stylesheets times 3334 files: 230,000
+  // parses of text that never changed, and 23 of a 25-second scan. The shape of the bug
+  // is quadratic, so the guard is a bound that only a quadratic implementation exceeds.
+  const sheets = Array.from({ length: 40 }, (_, i) => ({
+    file: `pkg/s${i}.css`,
+    content: Array.from({ length: 120 }, (_, r) => `.c${i}_${r} { color: #33${(r % 10)}${(r % 10)}44; background: #fff }`).join('\n'),
+    scope: 'pkg',
+  }));
+  const source = '<html><body><div class="c0_0"><p class="c1_1">Text</p></div></body></html>';
+
+  const started = Date.now();
+  for (let i = 0; i < 300; i++) run(`pkg/page${i}.html`, source, { stylesheets: sheets });
+  const elapsed = Date.now() - started;
+
+  assert.ok(
+    elapsed < 8000,
+    `300 files against 40 stylesheets took ${elapsed}ms; the sheets are being re-parsed`,
+  );
+});
