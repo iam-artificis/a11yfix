@@ -140,6 +140,22 @@ command-line flag always wins over the file.
 
 The same thing from the command line: `--ignore "apps/web/public/**" --disable A11Y-LINK-007`.
 
+For a single justified exception, a comment in the file beats turning the rule off
+everywhere:
+
+```html
+<!-- a11yfix-disable-next-line A11Y-IMG-001 -->
+<img src="divider.png">
+```
+
+`a11yfix-disable-line` and `a11yfix-disable-file` work too, in HTML comments and in JSX
+`{/* … */}` comments. Naming no rule suppresses every rule on that line. There is
+deliberately no "disable from here on" — a blanket switch buried mid-file is
+indistinguishable from the tool being broken, and nobody ever finds it again.
+
+Suppressions that stop matching anything are reported by file and line, so they cannot
+quietly outlive the problem they were written for.
+
 Every run prints which config it used, how many files were ignored and how many rules are
 off, so a finding that never appears can be traced to the line that silenced it.
 

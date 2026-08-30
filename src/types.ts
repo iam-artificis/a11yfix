@@ -107,6 +107,10 @@ export interface FileResult {
   readonly violations: readonly Violation[];
   /** Source after applying the fixes selected by the run's safety threshold. */
   readonly fixedSource?: string;
+  /** Findings hidden by an a11yfix-disable comment in this file. */
+  readonly suppressed?: number;
+  /** Suppression comments in this file that matched nothing. */
+  readonly unusedSuppressions?: readonly number[];
   readonly appliedFixes: number;
   readonly skippedFixes: number;
 }

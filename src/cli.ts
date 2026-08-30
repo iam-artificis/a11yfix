@@ -217,6 +217,21 @@ function printHuman(summary: RunSummary, opts: Options): void {
 
   const t = summary.totals;
   const filesWithFindings = summary.files.filter((f) => f.violations.length > 0);
+  const suppressedByComment = summary.files.reduce((n, f) => n + (f.suppressed ?? 0), 0);
+
+  // A suppression that no longer matches anything has outlived the problem it was written
+  // for. Reporting it is the only thing that stops them accumulating until nobody knows
+  // which are load-bearing.
+  const stale = summary.files.flatMap((f) =>
+    (f.unusedSuppressions ?? []).map((line) => `${f.file}:${line}`),
+  );
+  if (stale.length > 0) {
+    console.log('');
+    for (const where of stale.slice(0, 20)) {
+      console.log(c(C.yellow, `unused a11yfix-disable at ${where}`));
+    }
+    if (stale.length > 20) console.log(c(C.grey, `  …and ${stale.length - 20} more`));
+  }
   console.log('');
   if (t.violations === 0) {
     console.log(c(C.green, 'No violations found in the checks this tool can perform.'));
@@ -260,6 +275,11 @@ function printHuman(summary: RunSummary, opts: Options): void {
       );
     }
 
+    if (suppressedByComment > 0) {
+      console.log(
+        c(C.grey, `\n${plural(suppressedByComment, 'finding')} hidden by a11yfix-disable comments in the source.`),
+      );
+    }
     if (hiddenInfo > 0) {
       console.log(
         c(C.grey, `\n${plural(hiddenInfo, 'info finding')} not listed. Use --all to see them.`),
@@ -505,7 +525,10 @@ async function main(): Promise<number> {
       version: VERSION,
       totals: summary.totals,
       byRule: summary.byRule,
+      suppressed: results.reduce((n, r) => n + (r.suppressed ?? 0), 0),
       files: results.map((r) => ({
+        suppressed: r.suppressed ?? 0,
+        unusedSuppressions: r.unusedSuppressions ?? [],
         file: r.file,
         kind: r.kind,
         appliedFixes: r.appliedFixes,

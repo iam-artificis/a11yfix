@@ -14,6 +14,7 @@ import { parseMarkup, positionAt } from './parse/markup.js';
 import { Palette } from './design/palette.js';
 import type { StylesheetSource } from './design/palette.js';
 import { applyEdits, selectEdits } from './fix/apply.js';
+import { applySuppressions, findSuppressions } from './suppress.js';
 import { selectStylesheets } from './design/scope.js';
 
 export const VERSION = '0.1.0';
@@ -121,16 +122,32 @@ export function analyseSource(
 
   violations.sort((a, b) => (a.start !== b.start ? a.start - b.start : a.ruleId < b.ruleId ? -1 : 1));
 
+  // A comment in the file can hide a finding on one line. Applied after the rules run
+  // rather than before, so a suppression that no longer matches anything can be reported
+  // instead of quietly outliving the problem it was written for.
+  const { kept, suppressed, unused } = applySuppressions(violations, findSuppressions(source));
+  const unusedSuppressions = unused.map((s) => s.commentLine);
+
   if (options.fixThreshold == null) {
-    return { file, kind, violations, appliedFixes: 0, skippedFixes: violations.filter((v) => v.fix !== undefined).length };
+    return {
+      file,
+      kind,
+      violations: kept,
+      suppressed,
+      unusedSuppressions,
+      appliedFixes: 0,
+      skippedFixes: kept.filter((v) => v.fix !== undefined).length,
+    };
   }
 
-  const { edits, applied, skipped } = selectEdits(violations, options.fixThreshold);
+  const { edits, applied, skipped } = selectEdits(kept, options.fixThreshold);
   const result = applyEdits(source, edits);
   return {
     file,
     kind,
-    violations,
+    violations: kept,
+    suppressed,
+    unusedSuppressions,
     fixedSource: result.output,
     appliedFixes: applied - result.conflicted.length,
     skippedFixes: skipped + result.conflicted.length,

@@ -427,3 +427,69 @@ test('a rule turned off produces no findings', () => {
   // Disabling one rule must not disturb the others.
   assert.ok(off.violations.some((v) => v.ruleId === 'A11Y-COLOR-001'));
 });
+
+test('a disable comment hides one finding, not the rule', () => {
+  const source = `<!DOCTYPE html>
+<html lang="en">
+<head><title>T</title></head>
+<body><main>
+  <h1>Images</h1>
+  <!-- a11yfix-disable-next-line A11Y-IMG-001 -->
+  <img src="divider.png">
+  <img src="hero.png">
+</main></body>
+</html>`;
+  const result = run('page.html', source);
+  const missingAlt = result.violations.filter((v) => v.ruleId === 'A11Y-IMG-001');
+  assert.equal(missingAlt.length, 1, 'only the suppressed line should be hidden');
+  assert.equal(missingAlt[0].line, 8);
+  assert.equal(result.suppressed, 1);
+});
+
+test('a disable comment naming no rule hides everything on that line', () => {
+  const source = `<html><body>
+  <!-- a11yfix-disable-next-line -->
+  <img src="a.png">
+  <img src="b.png">
+</body></html>`;
+  const ids = run('t.html', source).violations.filter((v) => v.line === 3);
+  assert.deepEqual(ids, []);
+});
+
+test('a disable comment for a rule that no longer fires is reported', () => {
+  // Otherwise suppressions accumulate until nobody knows which are load-bearing.
+  const source = `<html><body>
+  <!-- a11yfix-disable-next-line A11Y-IMG-001 -->
+  <img src="a.png" alt="A cat on a mat">
+</body></html>`;
+  const result = run('t.html', source);
+  assert.deepEqual(result.unusedSuppressions, [2]);
+});
+
+test('disable-file applies to the whole file and disable-line to its own line', () => {
+  const perLine = `<html><body>
+  <img src="a.png"> <!-- a11yfix-disable-line A11Y-IMG-001 -->
+  <img src="b.png">
+</body></html>`;
+  assert.equal(run('t.html', perLine).violations.filter((v) => v.ruleId === 'A11Y-IMG-001').length, 1);
+
+  const wholeFile = `<!-- a11yfix-disable-file A11Y-IMG-001 -->
+<html><body>
+  <img src="a.png">
+  <img src="b.png">
+</body></html>`;
+  assert.equal(run('t.html', wholeFile).violations.filter((v) => v.ruleId === 'A11Y-IMG-001').length, 0);
+});
+
+test('a JSX comment works as a suppression too', () => {
+  const source = `export const A = () => (
+  <div>
+    {/* a11yfix-disable-next-line A11Y-IMG-001 */}
+    <img src="divider.png" />
+    <img src="hero.png" />
+  </div>
+);`;
+  const found = run('A.tsx', source).violations.filter((v) => v.ruleId === 'A11Y-IMG-001');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].line, 5);
+});
