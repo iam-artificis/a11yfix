@@ -36,7 +36,7 @@ change it to, and checks the change did not break the design.
 That translation step is most of the work, and no tool does it.
 
 A11yFix reads your **source**, keeps byte-exact offsets for every tag and attribute, and
-emits a patch. It runs in about a second on a few thousand files, needs no browser, no
+emits a patch. It scans 3,300 files in 1.6 seconds, needs no browser, no
 network, no API key, and no runtime dependencies at all.
 
 ## What it actually fixes
@@ -164,18 +164,19 @@ developer an afternoon and their trust in everything else the tool said.
 
 Measured against public repositories at the time of writing:
 
-| Repository | Files | Findings |
-|---|---|---|
-| `vercel/commerce` | 45 | 6 |
-| `tailwindlabs/tailwindcss.com` | 150 | 48 |
-| `documenso/documenso` | 674 | 69 |
-| `shadcn-ui/ui` | 3334 | 528 |
+| Repository | Files | Errors | Warnings |
+|---|---|---|---|
+| `vercel/commerce` | 45 | 4 | 1 |
+| `tailwindlabs/tailwindcss.com` | 150 | 27 | 14 |
+| `documenso/documenso` | 674 | 52 | 14 |
+| `shadcn-ui/ui` | 3334 | 100 | 71 |
 
 Getting there meant fixing five classes of confident, wrong finding that only real code
 produced — a discarded Tailwind opacity modifier reading `bg-green-500/10` as solid
 green, a stylesheet in one package colouring pages in another, `<Html>` from an email
 library treated as the document root, markup inside a `dedent` block treated as a page.
-Each is now a regression test.
+Each is now a regression test. The full write-up, with pinned commits and the cases where
+the tool is still wrong, is in [docs/field-report.md](docs/field-report.md).
 
 ## Install
 

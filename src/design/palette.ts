@@ -96,7 +96,7 @@ export class Palette {
     stylesheets: readonly StylesheetSource[] = [],
   ) {
     for (const sheet of stylesheets) {
-      const parsed = parseCss(sheet.content);
+      const parsed = parseSheet(sheet);
       Object.assign(this.variables, parsed.rootVariables);
       // Conditional rules describe a state we are not evaluating (dark mode, a
       // breakpoint, a hover). Including them would mix colour pairs that never co-occur.
@@ -410,6 +410,28 @@ export class Palette {
       certain,
     };
   }
+}
+
+/**
+ * Parsed stylesheets, keyed by the source object the caller handed us.
+ *
+ * A Palette is built per file and the same stylesheet objects are shared across the whole
+ * run, so parsing them in the constructor meant re-parsing every sheet for every file: on
+ * a repository with 70 stylesheets and 3300 source files that is 230,000 parses of text
+ * that never changed, and it was the difference between a scan taking twenty-three
+ * seconds and under two.
+ *
+ * A WeakMap rather than a content-keyed Map so nothing is retained after a run, and so
+ * two sheets that happen to have identical contents in different packages stay distinct.
+ */
+const parsedSheets = new WeakMap<StylesheetSource, ReturnType<typeof parseCss>>();
+
+function parseSheet(sheet: StylesheetSource): ReturnType<typeof parseCss> {
+  const hit = parsedSheets.get(sheet);
+  if (hit !== undefined) return hit;
+  const parsed = parseCss(sheet.content);
+  parsedSheets.set(sheet, parsed);
+  return parsed;
 }
 
 function findClass(classes: readonly string[], prefix: string): string | undefined {
