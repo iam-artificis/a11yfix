@@ -123,9 +123,25 @@ npx a11yfix . --all                    # include info findings and repeats
 npx a11yfix --rules                    # list all 68 rules
 npx a11yfix . --baseline-write         # record existing findings, then gate on new ones
 npx a11yfix . --baseline               # report only what is not in the baseline
+npx a11yfix . --report                 # standalone HTML audit report
 ```
 
 Exit code is `1` when any error-severity finding remains, so it works as a CI gate.
+
+## A report for people who will not run a CLI
+
+```bash
+npx a11yfix . --report              # writes a11yfix-report.html
+```
+
+One self-contained HTML file — no scripts, no fonts, no images, nothing to fetch — that
+opens offline, prints, and survives being emailed. It groups findings by rule, names the
+file and line for every one of them, quotes the source that triggered it, and links each
+rule to the W3C's own page for the criterion it belongs to.
+
+It states what the tool cannot check *before* the findings rather than after. A report
+that lets a passing automated scan imply conformance is the thing the FTC fined an
+overlay vendor for, and burying the caveat at the bottom is how that happens.
 
 ## Adopting on a project that already has findings
 

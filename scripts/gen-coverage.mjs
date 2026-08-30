@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { ALL_RULES } from '../dist/rules/index.js';
+import { CRITERIA } from '../dist/wcag.js';
 
 /**
  * Generate docs/coverage.md from the rule set.
@@ -10,64 +11,6 @@ import { ALL_RULES } from '../dist/rules/index.js';
  * document a function of the rules.
  */
 
-/** WCAG 2.2 success criteria, with the ones no static source analyser can reach marked. */
-const CRITERIA = [
-  ['1.1.1', 'A', 'Non-text Content', 'partial'],
-  ['1.2.1', 'A', 'Audio-only and Video-only (Prerecorded)', 'partial'],
-  ['1.2.2', 'A', 'Captions (Prerecorded)', 'partial'],
-  ['1.2.3', 'A', 'Audio Description or Media Alternative', 'human'],
-  ['1.2.4', 'AA', 'Captions (Live)', 'human'],
-  ['1.2.5', 'AA', 'Audio Description (Prerecorded)', 'human'],
-  ['1.3.1', 'A', 'Info and Relationships', 'partial'],
-  ['1.3.2', 'A', 'Meaningful Sequence', 'human'],
-  ['1.3.3', 'A', 'Sensory Characteristics', 'human'],
-  ['1.3.4', 'AA', 'Orientation', 'human'],
-  ['1.3.5', 'AA', 'Identify Input Purpose', 'partial'],
-  ['1.4.1', 'A', 'Use of Color', 'partial'],
-  ['1.4.2', 'A', 'Audio Control', 'partial'],
-  ['1.4.3', 'AA', 'Contrast (Minimum)', 'partial'],
-  ['1.4.4', 'AA', 'Resize Text', 'partial'],
-  ['1.4.5', 'AA', 'Images of Text', 'human'],
-  ['1.4.10', 'AA', 'Reflow', 'human'],
-  ['1.4.11', 'AA', 'Non-text Contrast', 'partial'],
-  ['1.4.12', 'AA', 'Text Spacing', 'human'],
-  ['1.4.13', 'AA', 'Content on Hover or Focus', 'human'],
-  ['2.1.1', 'A', 'Keyboard', 'partial'],
-  ['2.1.2', 'A', 'No Keyboard Trap', 'human'],
-  ['2.1.4', 'A', 'Character Key Shortcuts', 'partial'],
-  ['2.2.1', 'A', 'Timing Adjustable', 'human'],
-  ['2.2.2', 'A', 'Pause, Stop, Hide', 'human'],
-  ['2.3.1', 'A', 'Three Flashes or Below Threshold', 'human'],
-  ['2.4.1', 'A', 'Bypass Blocks', 'partial'],
-  ['2.4.2', 'A', 'Page Titled', 'partial'],
-  ['2.4.3', 'A', 'Focus Order', 'partial'],
-  ['2.4.4', 'A', 'Link Purpose (In Context)', 'partial'],
-  ['2.4.5', 'AA', 'Multiple Ways', 'human'],
-  ['2.4.6', 'AA', 'Headings and Labels', 'partial'],
-  ['2.4.7', 'AA', 'Focus Visible', 'partial'],
-  ['2.4.11', 'AA', 'Focus Not Obscured (Minimum)', 'human'],
-  ['2.5.1', 'A', 'Pointer Gestures', 'human'],
-  ['2.5.2', 'A', 'Pointer Cancellation', 'human'],
-  ['2.5.3', 'A', 'Label in Name', 'partial'],
-  ['2.5.4', 'A', 'Motion Actuation', 'human'],
-  ['2.5.7', 'AA', 'Dragging Movements', 'human'],
-  ['2.5.8', 'AA', 'Target Size (Minimum)', 'human'],
-  ['3.1.1', 'A', 'Language of Page', 'partial'],
-  ['3.1.2', 'AA', 'Language of Parts', 'human'],
-  ['3.2.1', 'A', 'On Focus', 'human'],
-  ['3.2.2', 'A', 'On Input', 'human'],
-  ['3.2.3', 'AA', 'Consistent Navigation', 'human'],
-  ['3.2.4', 'AA', 'Consistent Identification', 'human'],
-  ['3.2.6', 'A', 'Consistent Help', 'human'],
-  ['3.3.1', 'A', 'Error Identification', 'human'],
-  ['3.3.2', 'A', 'Labels or Instructions', 'partial'],
-  ['3.3.3', 'AA', 'Error Suggestion', 'human'],
-  ['3.3.4', 'AA', 'Error Prevention (Legal, Financial, Data)', 'human'],
-  ['3.3.7', 'A', 'Redundant Entry', 'human'],
-  ['3.3.8', 'AA', 'Accessible Authentication (Minimum)', 'human'],
-  ['4.1.2', 'A', 'Name, Role, Value', 'partial'],
-  ['4.1.3', 'AA', 'Status Messages', 'human'],
-];
 
 const covered = new Map();
 for (const rule of ALL_RULES) {
@@ -77,9 +20,9 @@ for (const rule of ALL_RULES) {
   }
 }
 
-const rows = CRITERIA.map(([sc, level, name, kind]) => {
+const rows = CRITERIA.map(({ sc, level, name, reach }) => {
   const rules = covered.get(sc) ?? [];
-  const status = rules.length === 0 ? 'not checked' : kind === 'human' ? 'not checked' : 'partial';
+  const status = rules.length === 0 ? 'not checked' : reach === 'human' ? 'not checked' : 'partial';
   return { sc, level, name, status, rules };
 });
 

@@ -719,7 +719,7 @@ const singleH1: Rule = {
 const uniqueIds: Rule = {
   id: 'A11Y-DOC-006',
   title: 'Duplicate id',
-  wcag: ['4.1.1'],
+  wcag: ['1.3.1', '4.1.2'],
   level: 'A',
   severity: 'error',
   summary: 'id values must be unique; ARIA references resolve to the first match only.',

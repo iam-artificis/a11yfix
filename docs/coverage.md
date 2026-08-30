@@ -24,7 +24,7 @@ part is clean and the human review can start from a smaller pile.
 | 1.1.1 | A | Non-text Content | A11Y-IMG-001, A11Y-IMG-002, A11Y-IMG-003, A11Y-IMG-004, A11Y-IMG-005, A11Y-IMG-006, A11Y-IMG-009, A11Y-IMG-010, A11Y-FORM-005, A11Y-ARIA-010 |
 | 1.2.1 | A | Audio-only and Video-only (Prerecorded) | A11Y-IMG-008 |
 | 1.2.2 | A | Captions (Prerecorded) | A11Y-IMG-008 |
-| 1.3.1 | A | Info and Relationships | A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-003, A11Y-FORM-007, A11Y-FORM-010, A11Y-DOC-004, A11Y-DOC-007, A11Y-DOC-008, A11Y-DOC-009, A11Y-DOC-010, A11Y-DOC-013, A11Y-ARIA-007, A11Y-ARIA-009 |
+| 1.3.1 | A | Info and Relationships | A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-003, A11Y-FORM-007, A11Y-FORM-010, A11Y-DOC-004, A11Y-DOC-006, A11Y-DOC-007, A11Y-DOC-008, A11Y-DOC-009, A11Y-DOC-010, A11Y-DOC-013, A11Y-ARIA-007, A11Y-ARIA-009 |
 | 1.3.5 | AA | Identify Input Purpose | A11Y-FORM-006 |
 | 1.4.1 | A | Use of Color | A11Y-COLOR-003 |
 | 1.4.3 | AA | Contrast (Minimum) | A11Y-COLOR-001 |
@@ -37,7 +37,7 @@ part is clean and the human review can start from a smaller pile.
 | 2.4.7 | AA | Focus Visible | A11Y-KBD-010 |
 | 3.1.1 | A | Language of Page | A11Y-DOC-001, A11Y-DOC-002 |
 | 3.3.2 | A | Labels or Instructions | A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-007, A11Y-FORM-008 |
-| 4.1.2 | A | Name, Role, Value | A11Y-IMG-004, A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-004, A11Y-FORM-005, A11Y-FORM-010, A11Y-DOC-014, A11Y-KBD-002, A11Y-KBD-004, A11Y-KBD-005, A11Y-KBD-009, A11Y-ARIA-001, A11Y-ARIA-002, A11Y-ARIA-004, A11Y-ARIA-005, A11Y-ARIA-006, A11Y-ARIA-008, A11Y-ARIA-009, A11Y-ARIA-011, A11Y-ARIA-012, A11Y-LINK-001, A11Y-LINK-007 |
+| 4.1.2 | A | Name, Role, Value | A11Y-IMG-004, A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-004, A11Y-FORM-005, A11Y-FORM-010, A11Y-DOC-006, A11Y-DOC-014, A11Y-KBD-002, A11Y-KBD-004, A11Y-KBD-005, A11Y-KBD-009, A11Y-ARIA-001, A11Y-ARIA-002, A11Y-ARIA-004, A11Y-ARIA-005, A11Y-ARIA-006, A11Y-ARIA-008, A11Y-ARIA-009, A11Y-ARIA-011, A11Y-ARIA-012, A11Y-LINK-001, A11Y-LINK-007 |
 
 ## Criteria this tool does not check
 
@@ -46,7 +46,7 @@ so a clean run tells you nothing about this list.
 
 | SC | Level | Name |
 |---|---|---|
-| 1.2.3 | A | Audio Description or Media Alternative |
+| 1.2.3 | A | Audio Description or Media Alternative (Prerecorded) |
 | 1.2.4 | AA | Captions (Live) |
 | 1.2.5 | AA | Audio Description (Prerecorded) |
 | 1.3.2 | A | Meaningful Sequence |
@@ -125,7 +125,7 @@ language are all judgements about intent. The tool marks them and refuses to gue
 | `A11Y-DOC-003` | 2.4.2 | A | Document has no title |
 | `A11Y-DOC-004` | 1.3.1 | A | Heading level skipped |
 | `A11Y-DOC-005` | — | A | Page does not have exactly one h1 |
-| `A11Y-DOC-006` | 4.1.1 | A | Duplicate id |
+| `A11Y-DOC-006` | 1.3.1, 4.1.2 | A | Duplicate id |
 | `A11Y-DOC-007` | 1.3.1 | A | List contains a child that is not a list item |
 | `A11Y-DOC-008` | 1.3.1 | A | List item outside a list |
 | `A11Y-DOC-009` | 1.3.1 | A | Table has no header cells |

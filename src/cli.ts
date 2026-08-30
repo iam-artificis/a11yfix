@@ -5,6 +5,8 @@ import type { FixSafety, Level, RunSummary, Violation } from './types.js';
 import { analyseSource, kindOf, packageRootOf, VERSION } from './engine.js';
 import { isIgnored, loadConfig } from './config.js';
 import { buildBaseline, compareToBaseline, readBaseline, writeBaseline } from './baseline.js';
+import { renderReport } from './report.js';
+import { countByFixClass, fixClass } from './fix/classify.js';
 import { unifiedDiff } from './fix/apply.js';
 import { ALL_RULES } from './rules/index.js';
 import type { StylesheetSource } from './design/palette.js';
@@ -23,6 +25,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 const DEFAULT_BASELINE = '.a11yfix-baseline.json';
+const DEFAULT_REPORT = 'a11yfix-report.html';
 
 interface Options {
   paths: string[];
@@ -40,6 +43,8 @@ interface Options {
   baseline?: string;
   baselineEnabled: boolean;
   baselineWrite: boolean;
+  /** Path for --report, or undefined when it was not asked for. */
+  report?: string;
   /** Glob patterns from --ignore, merged with the config file's. */
   ignore: string[];
   /** Set when --level was passed, so a config file cannot override an explicit flag. */
@@ -49,6 +54,21 @@ interface Options {
   help: boolean;
   version: boolean;
   maxFiles: number;
+}
+
+/** What the report says it audited: the paths asked for, or the working directory. */
+function reportSubject(paths: readonly string[]): string {
+  if (paths.length === 0 || (paths.length === 1 && paths[0] === '.')) {
+    const cwd = process.cwd();
+    const parts = cwd.split(/[\\/]/).filter((p) => p !== '');
+    return parts[parts.length - 1] ?? cwd;
+  }
+  return paths.join(', ');
+}
+
+/** The command that reproduces this report, printed in its footer. */
+function reportCommand(paths: readonly string[]): string {
+  return `a11yfix ${paths.length === 0 ? '.' : paths.join(' ')} --report`;
 }
 
 function parseArgs(argv: readonly string[]): Options {
@@ -88,6 +108,18 @@ function parseArgs(argv: readonly string[]): Options {
         if (v === 'A' || v === 'AA' || v === 'AAA') {
           o.level = v;
           o.levelFromFlag = true;
+        }
+        break;
+      }
+      case '--report': {
+        // The path is optional, like --baseline. Without one the report lands next to
+        // wherever the user is standing, under a name they will recognise later.
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith('-')) {
+          o.report = next;
+          i++;
+        } else {
+          o.report = DEFAULT_REPORT;
         }
         break;
       }
@@ -199,10 +231,15 @@ function printViolation(v: Violation, opts: Options): void {
   console.log(`          ${c(C.dim, v.impact)}`);
   if (v.excerpt !== '') console.log(`          ${c(C.grey, v.excerpt)}`);
   if (v.fix !== undefined) {
-    if (v.fix.advisory !== undefined) {
-      console.log(`          ${c(C.blue, 'needs a person:')} ${v.fix.advisory}`);
-    } else if (v.fix.edits.length > 0) {
-      const tag = v.fix.safety === 'automatic' ? c(C.green, 'auto-fixable') : c(C.yellow, 'fixable (review)');
+    const applicability = fixClass(v);
+    if (applicability === 'manual') {
+      const advice = v.fix.advisory ?? (v.fix.edits.length > 0 ? v.fix.description : undefined);
+      if (advice !== undefined) {
+        console.log(`          ${c(C.blue, 'needs a person:')} ${advice}`);
+      }
+    } else {
+      const tag =
+        applicability === 'automatic' ? c(C.green, 'auto-fixable') : c(C.yellow, 'fixable (review)');
       console.log(`          ${tag}: ${v.fix.description}`);
     }
   }
@@ -368,6 +405,7 @@ OPTIONS
   --disable IDS       Turn off rules, comma-separated
   --baseline [PATH]   Report only findings absent from the baseline
   --baseline-write    Record current findings as the baseline and exit
+  --report [PATH]     Write a standalone HTML audit report (default a11yfix-report.html)
   --rules             List every rule and exit
   --max-files N       Safety limit on files scanned (default: 5000)
   --version, -v
@@ -543,6 +581,8 @@ async function main(): Promise<number> {
   const byRuleCount = new Map<string, number>();
   for (const v of all) byRuleCount.set(v.ruleId, (byRuleCount.get(v.ruleId) ?? 0) + 1);
 
+  const fixCounts = countByFixClass(all);
+
   const summary: { -readonly [K in keyof RunSummary]: RunSummary[K] } = {
     files: results,
     totals: {
@@ -550,9 +590,9 @@ async function main(): Promise<number> {
       errors: all.filter((v) => v.severity === 'error').length,
       warnings: all.filter((v) => v.severity === 'warning').length,
       info: all.filter((v) => v.severity === 'info').length,
-      automatic: all.filter((v) => v.fix?.safety === 'automatic' && v.fix.edits.length > 0).length,
-      review: all.filter((v) => v.fix?.safety === 'review' && v.fix.edits.length > 0).length,
-      manual: all.filter((v) => v.fix?.safety === 'manual' || v.fix?.advisory !== undefined).length,
+      automatic: fixCounts.automatic,
+      review: fixCounts.review,
+      manual: fixCounts.manual,
       fixed: results.reduce((n, r) => n + r.appliedFixes, 0),
     },
     byRule: [...byRuleCount.entries()].map(([ruleId, count]) => ({ ruleId, count })).sort((a, b) => b.count - a.count),
@@ -600,6 +640,28 @@ async function main(): Promise<number> {
         // in memory; on disk nothing changed, and the summary must say so.
         summary.totals = { ...summary.totals, fixed: summary.totals.fixed - r.appliedFixes };
       }
+    }
+  }
+
+  if (opts.report !== undefined) {
+    const html = renderReport(summary, {
+      subject: reportSubject(opts.paths),
+      generatedAt: new Date().toISOString(),
+      level: opts.level,
+      toolVersion: VERSION,
+      includeInfo: opts.all,
+      command: reportCommand(opts.paths),
+    });
+    try {
+      await writeFile(opts.report, html, 'utf8');
+      if (!opts.json && !opts.quiet) {
+        console.log(c(C.green, `Report written to ${opts.report}`));
+      }
+    } catch (err) {
+      console.error(
+        `Could not write ${opts.report}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 2;
     }
   }
 
