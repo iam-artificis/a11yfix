@@ -247,8 +247,9 @@ Measured against public repositories at the time of writing:
 | Repository | Files | Errors | Warnings |
 |---|---|---|---|
 | `vercel/commerce` | 45 | 4 | 1 |
-| `tailwindlabs/tailwindcss.com` | 150 | 27 | 14 |
+| `tailwindlabs/tailwindcss.com` | 150 | 26 | 14 |
 | `documenso/documenso` | 674 | 52 | 14 |
+| `calcom/cal.com` | 989 | 827 | 542 |
 | `shadcn-ui/ui` | 3334 | 100 | 71 |
 
 Getting there meant fixing five classes of confident, wrong finding that only real code

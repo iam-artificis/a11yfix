@@ -108,25 +108,44 @@ function isSpace(ch: string | undefined): boolean {
  * rather than as a very long expression.
  */
 function scanBraces(src: string, start: number): number {
-  let depth = 0;
+  return scanBalanced(src, start, 0, 0);
+}
+
+/**
+ * How deep template literals and interpolations may nest before we give up.
+ *
+ * A real file does not reach five. The cap exists so that a pathological or truncated
+ * input cannot recurse until the stack overflows and takes the whole scan with it —
+ * losing every finding in every remaining file, not just this one. Refusing to read one
+ * expression is the same answer the rest of the parser gives when it cannot be sure.
+ */
+const MAX_NESTING = 32;
+
+/**
+ * Read JavaScript until the brace depth returns to zero.
+ *
+ * `depth` is 0 when `start` points at the opening `{`, and 1 when it points just past a
+ * `${`. Both are the same problem, and they used to be two functions: `scanBraces`
+ * treated a backtick as an ordinary quote with no notion of `${…}` inside it, while
+ * `skipInterpolation` understood templates but not comments. So this,
+ *
+ *     value={`<div style="width:${getDimension(w)};height:${getDimension(
+ *       h
+ *     )};overflow:scroll"></div>`}
+ *
+ * ended the attribute at the `}` of the second interpolation, the tag ended at the `>`
+ * of `</div>`, and the element was recorded as running to the end of the file. Every
+ * element in the 280 lines after it went unreported — including an `<iframe>` with no
+ * title, which is the finding that vanished from cal.com without anyone noticing.
+ *
+ * Returns the offset just past the closing brace, or -1 when it could not be read.
+ */
+function scanBalanced(src: string, start: number, depth: number, nesting: number): number {
+  if (nesting > MAX_NESTING) return -1;
   let i = start;
-  let quote: string | null = null;
 
   while (i < src.length) {
     const ch = src[i] as string;
-
-    if (quote !== null) {
-      if (ch === '\\') {
-        i += 2;
-        continue;
-      }
-      if (ch === quote) quote = null;
-      // A ' or " string cannot span a line. Without this a lone apostrophe leaves the
-      // scanner quoted for the rest of the file.
-      else if (ch === '\n' && quote !== '`') quote = null;
-      i++;
-      continue;
-    }
 
     if (ch === '/' && src[i + 1] === '/') {
       const nl = src.indexOf('\n', i);
@@ -147,9 +166,16 @@ function scanBraces(src: string, start: number): number {
       continue;
     }
 
-    if (ch === '"' || ch === "'" || ch === '`') {
-      quote = ch;
-      i++;
+    if (ch === '`') {
+      const end = skipTemplate(src, i, nesting + 1);
+      if (end < 0) return -1;
+      i = end;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      // A ' or " string cannot span a line. Without that rule a lone apostrophe leaves
+      // the scanner quoted for the rest of the file.
+      i = skipQuoted(src, i, ch);
       continue;
     }
 
@@ -632,7 +658,8 @@ function tagBefore(source: string, tick: number): string {
 }
 
 /** Index just past the closing backtick, or -1 when the literal is never closed. */
-function skipTemplate(source: string, start: number): number {
+function skipTemplate(source: string, start: number, nesting = 0): number {
+  if (nesting > MAX_NESTING) return -1;
   let i = start + 1;
   while (i < source.length) {
     const ch = source[i];
@@ -642,7 +669,12 @@ function skipTemplate(source: string, start: number): number {
     }
     if (ch === '`') return i + 1;
     if (ch === '$' && source[i + 1] === '{') {
-      i = skipInterpolation(source, i + 2);
+      // A failure here has to travel. Assigning -1 to `i` restarted the scan from index
+      // 0 with the depth counter still raised, which is not so much a wrong answer as a
+      // different file.
+      const end = scanBalanced(source, i + 2, 1, nesting + 1);
+      if (end < 0) return -1;
+      i = end;
       continue;
     }
     i++;
@@ -650,31 +682,6 @@ function skipTemplate(source: string, start: number): number {
   // Never closed. Returning source.length would say "this literal runs to the end of the
   // file", and the caller would then mask everything after it.
   return -1;
-}
-
-/** Index just past the `}` closing a \${…} interpolation, honouring nesting. */
-function skipInterpolation(source: string, start: number): number {
-  let depth = 1;
-  let i = start;
-  while (i < source.length && depth > 0) {
-    const ch = source[i];
-    if (ch === '\\') {
-      i += 2;
-      continue;
-    }
-    if (ch === '`') {
-      i = skipTemplate(source, i);
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      i = skipQuoted(source, i, ch);
-      continue;
-    }
-    if (ch === '{') depth++;
-    else if (ch === '}') depth--;
-    i++;
-  }
-  return i;
 }
 
 function skipQuoted(source: string, start: number, quote: string): number {

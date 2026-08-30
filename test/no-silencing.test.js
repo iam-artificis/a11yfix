@@ -119,3 +119,36 @@ test('lang="" is reported rather than accepted as a language', () => {
   // And the tool must not guess which language was meant.
   assert.equal(v.fix?.edits.length ?? 0, 0);
 });
+
+test('a marker can actually reach a file, and fails the next run', () => {
+  // The README and comparison.md both sell this: nothing is written into a name
+  // position except an empty value "or a marker that fails CI". Every marker-writing
+  // fix was safety 'manual', and 'manual' is above the highest threshold the CLI can
+  // ask for — so no invocation could produce a marker, and A11Y-TODO-001, written to
+  // catch them, had nothing to catch. The claim was unfalsifiable rather than true.
+  const source = `export const A = () => (<div><a href="/x"><span /></a></div>);`;
+
+  const without = analyseSource('A.tsx', source, {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: 'review',
+  });
+  assert.ok(
+    !(without.fixedSource ?? '').includes(TODO_MARKER),
+    'a marker must not be written by --include-review',
+  );
+
+  const with_ = analyseSource('A.tsx', source, {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: 'review',
+    markTodos: true,
+  });
+  assert.ok(with_.fixedSource !== undefined, '--mark-todos wrote nothing');
+  assert.ok(with_.fixedSource.includes(TODO_MARKER), `no marker in: ${with_.fixedSource}`);
+
+  const after = analyse('A.tsx', with_.fixedSource, null).violations;
+  const todo = after.filter((v) => v.ruleId === 'A11Y-TODO-001');
+  assert.equal(todo.length, 1, 'the marker left in the file was not reported');
+  assert.equal(todo[0].severity, 'error', 'a marker must fail the build, not warn');
+});

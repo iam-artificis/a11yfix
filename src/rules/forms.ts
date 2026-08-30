@@ -156,17 +156,6 @@ function insertAttrEdit(
   return { start: at, end: at, replacement: spacedBefore ? text + ' ' : ' ' + text, label };
 }
 
-/**
- * Escape a string for use inside a double-quoted attribute value.
- * Returns null when the text is not worth round-tripping — we would rather emit no
- * patch than emit one whose escaping a human has to double-check.
- */
-function quoteAttrValue(text: string): string | null {
-  if (text.length === 0 || text.length > 120) return null;
-  if (/[<>&"'`\\{}\n\r\t]/.test(text)) return null;
-  return '"' + text + '"';
-}
-
 /** Elements a `<label for>` is allowed to point at. */
 const LABELABLE = new Set(['input', 'select', 'textarea', 'button', 'meter', 'output', 'progress']);
 
@@ -609,29 +598,27 @@ const placeholderAsLabel: Rule = {
       const source = nameSourceOf(ctx, el, index);
       if (source.kind !== 'none') continue;
 
-      const quoted = quoteAttrValue(placeholder);
-      const edit =
-        quoted === null
-          ? null
-          : insertAttrEdit(ctx.source, el, `aria-label=${quoted}`, 'copy placeholder into aria-label');
+      // Deliberately not a copy of the placeholder. Placeholders carry example values as
+      // often as names — "e.g. jane@example.com", "dd/mm/yyyy", "Search…" — and announcing
+      // one as the field's name is worse than announcing nothing, because it reads as
+      // deliberate and it silences every checker downstream, including this one. The
+      // placeholder is quoted in the message instead, where a human can weigh it. This is
+      // also the promise the README makes: nothing but an empty value or a marker is ever
+      // written into a name position.
+      const edit = insertAttrEdit(
+        ctx.source,
+        el,
+        `aria-label=${markerValue('name this field')}`,
+        'insert a placeholder aria-label for a human to replace',
+      );
 
-      const fix: Fix =
-        edit === null
-          ? {
-              safety: 'manual',
-              edits: [],
-              description: 'Add a visible <label> for this field.',
-              advisory:
-                'The placeholder text is not simple enough to copy into an attribute safely. ' +
-                'Add a visible <label for="…"> instead — it is the better fix regardless.',
-            }
-          : {
-              safety: 'review',
-              edits: [edit],
-              description:
-                `Copies the placeholder into aria-label="${placeholder}" so the field is at least ` +
-                'named; a visible <label> that stays on screen is still the correct fix.',
-            };
+      const fix: Fix = markerFix(
+        edit,
+        `Inserts an aria-label containing ${TODO_MARKER} that a human must replace; a visible ` +
+          '<label for> that stays on screen is the better fix.',
+        'Add a visible <label for="…"> naming this field. The placeholder is not a name: ' +
+          'copying it in would announce an example value as the field’s name.',
+      );
 
       out.push(
         ctx.report({

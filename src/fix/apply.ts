@@ -1,4 +1,5 @@
 import type { Edit, Fix, FixSafety, Violation } from '../types.js';
+import { TODO_MARKER } from '../types.js';
 
 /**
  * Applying edits and rendering diffs.
@@ -26,11 +27,22 @@ const SAFETY_ORDER: Readonly<Record<FixSafety, number>> = {
   manual: 2,
 };
 
-/** True when a fix is allowed under the run's threshold. */
-export function fixAllowed(fix: Fix, threshold: FixSafety): boolean {
+/**
+ * True when a fix is allowed under the run's threshold.
+ *
+ * `markTodos` is a separate door rather than a higher threshold, because a marker is
+ * not a repair: it names an unnamed link with text that fails CI, so that the thing a
+ * machine cannot decide is impossible to forget rather than quietly absent. No safety
+ * level should let that into a file by accident — but without any door at all, the
+ * mechanism the README sells could never run. Every marker-writing rule was
+ * `manual`, and `manual` is above the highest threshold the CLI can ask for, so the
+ * TODO rule built to catch markers had nothing to catch.
+ */
+export function fixAllowed(fix: Fix, threshold: FixSafety, markTodos = false): boolean {
   if (fix.advisory !== undefined) return false;
   if (fix.edits.length === 0) return false;
-  return SAFETY_ORDER[fix.safety] <= SAFETY_ORDER[threshold];
+  if (SAFETY_ORDER[fix.safety] <= SAFETY_ORDER[threshold]) return true;
+  return markTodos && fix.edits.every((e) => e.replacement.includes(TODO_MARKER));
 }
 
 /** Apply a set of edits to a source string. */
@@ -66,13 +78,14 @@ export function applyEdits(source: string, edits: readonly Edit[]): ApplyResult 
 export function selectEdits(
   violations: readonly Violation[],
   threshold: FixSafety,
+  markTodos = false,
 ): { edits: Edit[]; applied: number; skipped: number } {
   const edits: Edit[] = [];
   let applied = 0;
   let skipped = 0;
   for (const v of violations) {
     if (v.fix === undefined) continue;
-    if (fixAllowed(v.fix, threshold)) {
+    if (fixAllowed(v.fix, threshold, markTodos)) {
       edits.push(...v.fix.edits);
       applied++;
     } else {

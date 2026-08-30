@@ -59,6 +59,11 @@ export interface AnalyseOptions {
   readonly disabled?: ReadonlySet<string>;
   /** Highest safety level of fix that may be written to disk. */
   readonly fixThreshold?: FixSafety | null;
+  /**
+   * Also write the placeholder markers for findings a machine cannot decide — an
+   * unnamed link, an icon-only button. They fail CI by design; see fixAllowed.
+   */
+  readonly markTodos?: boolean;
 }
 
 /** Analyse one already-loaded file. */
@@ -140,7 +145,11 @@ export function analyseSource(
     };
   }
 
-  const { edits, applied, skipped } = selectEdits(kept, options.fixThreshold);
+  const { edits, applied, skipped } = selectEdits(
+    kept,
+    options.fixThreshold,
+    options.markTodos ?? false,
+  );
   const result = applyEdits(source, edits);
   return {
     file,

@@ -33,12 +33,22 @@ test('no fix invents alternative text, link text or a language code', () => {
 <body>
   <img src="hero.png">
   <a href="/x"><span></span></a>
+  <a href="/y" aria-label=""></a>
   <button><svg viewBox="0 0 1 1"></svg></button>
   <input type="text">
+  <input type="email" placeholder="e.g. jane@example.com">
+  <input type="submit" value="">
+  <select></select>
+  <div role="img" class="logo"></div>
   <iframe src="/embed"></iframe>
 </body>
 </html>`;
-  const result = run('page.html', source);
+  // markTodos, or the marker-writing fixes are never selected and the sweep walks past
+  // the exact rules whose job is to write into a name position. A placeholder-only
+  // <input> is in the fixture for the same reason: A11Y-FORM-002 used to copy
+  // placeholder="e.g. jane@example.com" into aria-label, which this test claims cannot
+  // happen, and no fixture ever gave it the chance to.
+  const result = run('page.html', source, { markTodos: true });
   assert.ok(result.violations.length > 0, 'expected findings on deliberately broken markup');
 
   for (const v of result.violations) {
@@ -195,6 +205,36 @@ test('fix safety levels are respected', () => {
   for (const v of auto.violations) {
     if (v.fix?.advisory !== undefined) {
       assert.equal(v.fix.edits.length, 0, `${v.ruleId} carries both advice and edits`);
+    }
+  }
+});
+
+test('a fix either patches or advises, never both', () => {
+  // An advisory means "the tool declined to patch", and fixAllowed enforces that by
+  // refusing any fix carrying one. So a rule that ships edits *and* an advisory has
+  // silently shipped edits that nothing can ever apply — which is how every
+  // marker-writing fix in the tool came to be unreachable while the README sold the
+  // mechanism.
+  const sources = {
+    'page.html': `<!DOCTYPE html><html><head></head><body>
+      <img src="a.png"><a href="/x"><span></span></a><a href="/y" aria-label=""></a>
+      <button><svg viewBox="0 0 1 1"></svg></button><input type="text">
+      <input type="email" placeholder="Email"><select></select>
+      <div role="img" class="logo"></div><iframe src="/e"></iframe>
+      <p style="color:#aaaaaa;background:#ffffff;font-size:14px">low contrast</p>
+      <div onclick="go()">clickable</div><table><tr><td>1</td></tr></table>
+      </body></html>`,
+    'C.tsx': `export const C = () => (<div className="bg-white">
+      <p className="text-gray-400">faint</p><a onClick={go}>Go</a>
+      <img src={src} /><input placeholder="Search…" /></div>);`,
+  };
+  for (const [file, source] of Object.entries(sources)) {
+    for (const v of run(file, source).violations) {
+      if (v.fix === undefined) continue;
+      assert.ok(
+        !(v.fix.edits.length > 0 && v.fix.advisory !== undefined),
+        `${v.ruleId} carries ${v.fix.edits.length} edits and an advisory, so the edits are dead`,
+      );
     }
   }
 });

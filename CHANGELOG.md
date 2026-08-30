@@ -32,3 +32,34 @@ test:
 - `<Html>` from an email library was treated as the document root.
 - Markup inside a `dedent` template literal was treated as a page.
 - Text over a hero image was measured against an assumed white background.
+
+A pre-launch adversarial review found thirty defects. The four critical ones were all the
+same shape — the tool leaving a repository worse than not running it — and all four are
+closed:
+
+- A quote inside a comment or a regex made `scanBraces` swallow the rest of the module,
+  so `--fix` wrote an attribute past the end of the file.
+- The contrast solver re-attached the source alpha to a colour it had solved as opaque,
+  so a fix could halve the ratio it reported having raised.
+- `--fix --include-review` could silence the missing-`lang` error permanently. It cannot
+  now, and `A11Y-TODO-001` reports any marker left in a file as an error.
+- A wrapper element was blamed for text that lives in its children.
+
+Also from that review, and from the corpus run that follows it:
+
+- `--diff` now previews every fix a human would review, not only the automatic ones.
+  The README's own headline command printed "No fixable violations found." on the
+  README's own example file.
+- `--mark-todos` writes the placeholder markers for findings only a person can decide.
+  Every marker-writing rule was `manual`, which no threshold admits, so the mechanism
+  the documentation describes could never actually run.
+- `A11Y-FORM-002` no longer copies a placeholder into `aria-label`. Placeholders carry
+  example values as often as names, and announcing "e.g. jane@example.com" as a field's
+  name is worse than announcing nothing — it also silences every checker downstream.
+- One scanner now reads both `{…}` attributes and `${…}` interpolations. Two of them
+  disagreed about a template literal nested inside a JSX attribute, and 280 lines of a
+  real component stopped being parsed without any error.
+- `flatten` rounds to 8-bit channels, so the half that verifies a fix and the half that
+  measures it agree to the last decimal.
+- Stylesheet rules are ranked by specificity, and `em`/`%` font sizes resolve up the
+  ancestor chain or stay honestly unknown.

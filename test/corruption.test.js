@@ -330,3 +330,76 @@ test('division is not mistaken for a regex', () => {
     ['style', 'id'],
   );
 });
+
+/**
+ * A template literal inside a JSX attribute, with `${…}` inside that, and a nested
+ * template inside the interpolation. Two scanners disagreed about it: `scanBraces` read
+ * a backtick as an ordinary quote and had no notion of `${`, so the `}` that closed an
+ * interpolation closed the attribute instead. The tag then ended at the first `>` in the
+ * template's own markup, and the element was recorded as running to the end of the file.
+ *
+ * Nothing failed loudly. The elements after it simply stopped existing — 280 lines of a
+ * real component, including an `<iframe>` with no title, which is how the defect was
+ * finally noticed: a finding disappeared from a corpus measurement that a document
+ * elsewhere in the repository claimed was reproducible.
+ */
+test('a nested template literal in an attribute does not swallow the rest of the file', () => {
+  const t = tick;
+  const source = [
+    'export const Embed = () => (',
+    '  <>',
+    '    <textarea',
+    '      readOnly',
+    '      value={' + t + '<!-- begins -->\n${',
+    '        inline',
+    '          ? ' + t + '<div style="width:${dim(w)};height:${dim(',
+    '              h',
+    '            )};overflow:scroll" id="cal-${ns}"></div>\n' + t,
+    '          : ""',
+    '      }<script>${snippet}</script>' + t + '}',
+    '    />',
+    '    <p className="hint">Need help?</p>',
+    '    <iframe src={src} />',
+    '  </>',
+    ');',
+  ].join('\n');
+
+  const tags = parseMarkup(source).elements.map((e) => e.tagLower);
+  assert.ok(tags.includes('p'), `the <p> after the template vanished; found: ${tags}`);
+  assert.ok(tags.includes('iframe'), `the <iframe> after the template vanished; found: ${tags}`);
+
+  const textarea = parseMarkup(source).elements.find((e) => e.tagLower === 'textarea');
+  assert.ok(textarea !== undefined, 'no <textarea>');
+  assert.ok(
+    textarea.openEnd < source.indexOf('<p className'),
+    'the opening tag was recorded as reaching past the elements that follow it',
+  );
+
+  // And the finding that went missing is reported again.
+  const result = analyseSource('Embed.tsx', source, {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: null,
+  });
+  assert.ok(
+    result.violations.some((v) => v.ruleId === 'A11Y-DOC-014'),
+    'the untitled <iframe> after the template was not reported',
+  );
+});
+
+test('nesting deeper than the parser will follow yields no element, not a wrong one', () => {
+  // The cap is a stack guard, and the answer when it is hit has to be the same as every
+  // other thing the parser cannot read: no element, rather than one whose extent is a
+  // guess. A crash here would lose every finding in every remaining file.
+  const t = tick;
+  let expr = 'x';
+  for (let i = 0; i < 80; i++) expr = t + '${' + expr + '}' + t;
+  const source = `export const A = () => (<div title={${expr}}><img src="a.png" /></div>);`;
+
+  const elements = parseMarkup(source).elements;
+  const div = elements.find((e) => e.tagLower === 'div');
+  assert.equal(div, undefined, 'a tag the parser cannot read must not become an element');
+  assert.doesNotThrow(() =>
+    analyseSource('A.tsx', source, { rules: ALL_RULES, level: 'AA', fixThreshold: null }),
+  );
+});

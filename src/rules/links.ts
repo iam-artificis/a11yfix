@@ -408,11 +408,15 @@ const emptyLink: Rule = {
           impact:
             'A screen reader announces "link" with no destination, and in a list of the page\'s links it appears as a blank row a user can only explore by activating it.',
           fix: {
+            // An advisory means "no patch offered", and this rule offers one: fixAllowed
+            // refuses any fix carrying both, so the guidance goes in the description or
+            // the edits are dead weight nothing can ever apply.
             safety: 'manual',
             edits,
-            description: `Insert an aria-label placeholder containing ${TODO_MARKER} for a human to complete.`,
-            advisory:
-              'The marker fails CI on purpose. Replace it with text naming the destination, or delete the link if it is decorative.',
+            description:
+              `Inserts aria-label="${TODO_MARKER} …" for a human to complete. The marker fails ` +
+              'CI on purpose: replace it with text naming the destination, or delete the link ' +
+              'if it is decorative. Written only under --mark-todos.',
           },
         }),
       );

@@ -32,6 +32,7 @@ interface Options {
   level: Level;
   fix: boolean;
   includeReview: boolean;
+  markTodos: boolean;
   diff: boolean;
   json: boolean;
   quiet: boolean;
@@ -77,6 +78,7 @@ function parseArgs(argv: readonly string[]): Options {
     level: 'AA',
     fix: false,
     includeReview: false,
+    markTodos: false,
     diff: false,
     json: false,
     quiet: false,
@@ -96,6 +98,7 @@ function parseArgs(argv: readonly string[]): Options {
     switch (a) {
       case '--fix': o.fix = true; break;
       case '--include-review': o.includeReview = true; break;
+      case '--mark-todos': o.markTodos = true; break;
       case '--diff': o.diff = true; break;
       case '--json': o.json = true; break;
       case '--quiet': case '-q': o.quiet = true; break;
@@ -396,7 +399,9 @@ USAGE
 OPTIONS
   --fix               Write automatic fixes to disk
   --include-review    With --fix, also apply fixes that want a human glance
-  --diff              Print a unified diff instead of writing files
+  --mark-todos        Also write TODO markers for findings only a person can decide.
+                      They fail CI on purpose, so nothing is quietly left undone.
+  --diff              Print a unified diff instead of writing files (shows both)
   --level A|AA|AAA    Conformance target (default: AA)
   --json              Machine-readable output
   --quiet, -q         One line per finding
@@ -512,7 +517,18 @@ async function main(): Promise<number> {
     }
   }
 
-  const threshold: FixSafety | null = opts.fix || opts.diff ? (opts.includeReview ? 'review' : 'automatic') : null;
+  // A preview writes nothing. Its whole job is to put changes in front of a person, so
+  // withholding the ones that want a person's glance is backwards — and it made the
+  // README's headline command print "No fixable violations found." on the README's own
+  // example. Writing to disk is the irreversible half, and that half stays conservative:
+  // --fix applies automatic fixes only until --include-review says otherwise.
+  const threshold: FixSafety | null = opts.diff
+    ? 'review'
+    : opts.fix
+      ? opts.includeReview
+        ? 'review'
+        : 'automatic'
+      : null;
 
   const results = [];
   for (const f of files) {
@@ -529,6 +545,7 @@ async function main(): Promise<number> {
       level: opts.level,
       stylesheets: sheets,
       fixThreshold: threshold,
+      markTodos: opts.markTodos,
       disabled,
     });
     results.push({ ...r, absolute: f, source });
@@ -617,7 +634,26 @@ async function main(): Promise<number> {
       process.stdout.write(unifiedDiff(r.file, r.source, r.fixedSource));
       any = true;
     }
-    if (!any) console.error('No fixable violations found.');
+    if (!any) {
+      console.error('No fixable violations found.');
+      return summary.totals.errors > 0 ? 1 : 0;
+    }
+    // On stderr, so `a11yfix src --diff | git apply` still works. A preview that shows
+    // more than `--fix` would write has to say so here, or the difference is discovered
+    // as a surprise later.
+    const needsReview = results
+      .flatMap((r) => r.violations)
+      .filter((v) => fixClass(v) === 'review').length;
+    if (needsReview > 0) {
+      console.error(
+        c(
+          C.grey,
+          `
+${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human glance. ` +
+            '--fix applies automatic fixes only; add --include-review to write these.',
+        ),
+      );
+    }
     return summary.totals.errors > 0 ? 1 : 0;
   }
 
