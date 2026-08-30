@@ -354,7 +354,21 @@ export function repairContrast(
   const original = which === 'foreground' ? flatten(foreground, bgOpaque) : bgOpaque;
   const other = which === 'foreground' ? bgOpaque : flatten(foreground, bgOpaque);
 
-  if (contrastRatio(original, other) >= target) return null;
+  /**
+   * The ratio a candidate for the moving side would actually render at.
+   *
+   * When the background moves and the foreground is translucent, the foreground
+   * re-composites over the *new* background — so the other side of the comparison is not
+   * fixed, and freezing it solved a problem the browser is not going to have. It
+   * reported "change the background to #323232, reaching 4.50:1" for a case that renders
+   * at 3.43:1 and still fails. A sweep found twenty more.
+   */
+  const ratioWith = (candidate: RGB): number =>
+    which === 'foreground'
+      ? contrastRatio(candidate, other)
+      : contrastRatio(flatten(foreground, candidate), candidate);
+
+  if (ratioWith(original) >= target) return null;
 
   const start = rgbToOklch(original);
   const otherLum = relativeLuminance(other);
@@ -366,7 +380,7 @@ export function repairContrast(
     const limit = dir === 1 ? 1 : 0;
     // Does the extreme even reach the target? If not, this direction is hopeless.
     const extreme = oklchToRgb({ ...start, l: limit });
-    if (contrastRatio(extreme, other) < target) continue;
+    if (ratioWith(extreme) < target) continue;
 
     // Binary search the smallest |ΔL| that passes. Contrast is monotonic in lightness
     // once the direction is fixed, so bisection is exact to within the tolerance.
@@ -375,11 +389,11 @@ export function repairContrast(
     for (let i = 0; i < 32; i++) {
       const mid = (lo + hi) / 2;
       const candidate = oklchToRgb({ ...start, l: mid });
-      if (contrastRatio(candidate, other) >= target) hi = mid;
+      if (ratioWith(candidate) >= target) hi = mid;
       else lo = mid;
     }
     const fixed = oklchToRgb({ ...start, l: hi });
-    const ratio = contrastRatio(fixed, other);
+    const ratio = ratioWith(fixed);
     // Guard against rounding leaving us a hair under the threshold.
     if (ratio < target) continue;
     return {

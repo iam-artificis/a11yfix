@@ -96,6 +96,62 @@ test('no translucent input produces a fix that lowers contrast', () => {
   }
 });
 
+test('every colour the tool names reaches the target, patched or merely advised', () => {
+  // The solver froze one side of the pair while moving the other. That is right when the
+  // foreground is opaque and wrong the moment it is not: a translucent foreground
+  // re-composites over the *new* background, so the ratio the solver proved is not the
+  // one the browser renders. It reported "change the background to #323232, reaching
+  // 4.50:1" for a pair that renders at 3.43:1 and still fails.
+  //
+  // The advisory matters as much as the edit. When the change is too large to patch the
+  // tool still names a colour, and a human will paste it in — so it has to be right for
+  // the same reason.
+  const ratio = (fg, bg) => {
+    const opaque = { ...bg, a: 1 };
+    return contrastRatio(flatten(fg, opaque), opaque);
+  };
+
+  const pairs = [
+    ['rgba(255,255,255,0.4)', '#555555'],
+    ['rgba(255,255,255,0.6)', '#bbbbbb'],
+    ['rgba(255,255,255,0.3)', '#777777'],
+    ['rgba(0,0,0,0.4)', '#888888'],
+    ['rgba(0,0,0,0.25)', '#cccccc'],
+    ['#ffffff66', '#555555'],
+    ['#00000055', '#999999'],
+    ['rgba(30,30,120,0.5)', '#dddddd'],
+    ['rgba(255,0,0,0.5)', '#333333'],
+    ['rgba(200,200,255,0.35)', '#404040'],
+  ];
+
+  for (const [fgText, bgText] of pairs) {
+    const source =
+      `<html lang="en"><head><title>t</title></head><body><main><h1>h</h1>` +
+      `<p style="background-color: ${bgText}; color: ${fgText}; font-size: 16px">Read me</p>` +
+      `</main></body></html>`;
+
+    const v = analyse('p.html', source).violations.find((x) => x.ruleId === 'A11Y-COLOR-001');
+    assert.ok(v !== undefined, `${fgText} on ${bgText} should fail AA`);
+
+    const text = `${v.fix?.advisory ?? ''} ${v.fix?.description ?? ''}`;
+    const named =
+      /moves the (foreground|background) to (#[0-9a-f]{6})/i.exec(text) ??
+      /Change the (foreground|background) from \S+ to (#[0-9a-f]{6})/i.exec(text);
+    assert.ok(named, `${fgText} on ${bgText}: no colour named in "${text.trim()}"`);
+
+    const fg = parseColor(fgText);
+    const bg = parseColor(bgText);
+    const proposed = parseColor(named[2]);
+    const achieved =
+      named[1].toLowerCase() === 'foreground' ? ratio(proposed, bg) : ratio(fg, proposed);
+
+    assert.ok(
+      achieved >= 4.5 - 0.01,
+      `${fgText} on ${bgText}: named ${named[1]} ${named[2]}, which measures ${achieved.toFixed(2)}:1`,
+    );
+  }
+});
+
 test('repairContrast returns the colour it verified, not one wearing its alpha', () => {
   const translucent = { r: 0, g: 0, b: 0, a: 0.5 };
   const white = { r: 255, g: 255, b: 255, a: 1 };
