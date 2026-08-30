@@ -4,7 +4,7 @@
 
 First release.
 
-- 68 rules across contrast, images and media, forms, document structure, keyboard
+- 69 rules across contrast, images and media, forms, document structure, keyboard
   operability, ARIA, and links, each anchored to the WCAG 2.2 success criterion it
   implements. `docs/coverage.md` is generated from the rule set, so it cannot overstate
   what is covered.

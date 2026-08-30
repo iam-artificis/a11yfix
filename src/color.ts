@@ -383,7 +383,13 @@ export function repairContrast(
     // Guard against rounding leaving us a hair under the threshold.
     if (ratio < target) continue;
     return {
-      color: { ...fixed, a: which === 'foreground' ? foreground.a : background.a },
+      // The solved colour is opaque, and it is the one whose ratio was just verified.
+      // Putting the source alpha back would hand out a colour nobody measured: written
+      // to the file it composites over the backdrop a second time, so the ratio the
+      // solver proved is not the ratio the browser renders. rgba(0,0,0,0.5) at 3.98:1
+      // came back as #76767680 at 1.94:1 — the tool making the defect twice as bad
+      // while reporting it fixed.
+      color: fixed,
       moved: which,
       ratio,
       deltaL: Math.abs(hi - start.l),

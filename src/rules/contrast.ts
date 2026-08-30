@@ -196,9 +196,16 @@ function buildEdit(
   }
 
   const direct = parseColor(newHex);
+  if (direct === null) return null;
+  const achieved = contrastRatio(flatten(direct, against), against);
+  // The same guard the Tailwind branch above applies, for the same reason: a fix that
+  // does not fix is worse than no fix, because the violation looks handled and nobody
+  // looks at it again. This branch used to trust the solver's own arithmetic; it had a
+  // bug, and nothing downstream noticed.
+  if (achieved < required) return null;
   return {
     edit: { start: span.start, end: span.end, replacement: newHex, label },
-    achieved: direct === null ? required : contrastRatio(flatten(direct, against), against),
+    achieved,
   };
 }
 

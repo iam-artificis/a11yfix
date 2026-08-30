@@ -58,7 +58,7 @@ ratio that step really reaches. It composites `bg-black/10` against what is behi
 resolves CSS custom properties and Tailwind v4 `@theme` tokens, and stops at a gradient
 or a background image instead of pretending the colour underneath is what you see.
 
-Beyond contrast, 68 rules cover images and media alternatives, form labelling, document
+Beyond contrast, 69 rules cover images and media alternatives, form labelling, document
 structure, keyboard operability, ARIA correctness, and link semantics — each anchored to
 the WCAG success criterion it implements.
 
@@ -89,7 +89,11 @@ the ideal colour the solver aimed at. It is a number you can check.
 **It does not invent alt text.** It cannot see the image. A plausible-sounding wrong
 description is worse than a missing one: it lies to a screen-reader user *and* makes
 every downstream checker report the page as fixed. Same for link text, button labels, and
-`lang`. Those are reported with a marker that fails CI until a person writes the words.
+`lang`. Those are reported and never patched: the finding stays, and the exit code stays
+1, until a person writes the words.
+
+Where a fix does leave a placeholder for someone to complete, `A11Y-TODO-001` reports the
+placeholder itself as an error, so an unfinished fix cannot pass as a finished one.
 
 **It does not claim conformance.** Automated testing reaches roughly a third of WCAG's
 success criteria. A clean run means the machine-checkable subset passes. Keyboard flows,
@@ -120,7 +124,7 @@ npx a11yfix src --fix                  # apply automatic fixes
 npx a11yfix src --fix --include-review # apply reviewable fixes too
 npx a11yfix . --json                   # machine-readable
 npx a11yfix . --all                    # include info findings and repeats
-npx a11yfix --rules                    # list all 68 rules
+npx a11yfix --rules                    # list all 69 rules
 npx a11yfix . --baseline-write         # record existing findings, then gate on new ones
 npx a11yfix . --baseline               # report only what is not in the baseline
 npx a11yfix . --report                 # standalone HTML audit report

@@ -262,19 +262,12 @@ const htmlHasLang: Rule = {
         fix = {
           safety: 'review',
           edits: [
-            addAttribute(
-              ctx,
-              el,
-              'lang="" data-a11yfix-todo="' +
-                TODO_MARKER +
-                ': replace lang=\'\' with this page\'s BCP 47 tag, e.g. en, en-GB, de-AT"',
-              'add lang and a TODO marker to <html>',
-            ),
+            addAttribute(ctx, el, 'lang=""', 'add an empty lang to <html>'),
           ],
           description:
-            'Add an empty lang attribute plus a TODO marker for a human to fill in. ' +
-            'lang="" is the standard "language unknown" value, so it is never worse ' +
-            'than the current state, and the marker fails CI until the tag is set.',
+            'Add an empty lang attribute for a human to fill in. lang="" is the standard ' +
+            '"language unknown" value, so it is never worse than the current state, and ' +
+            'A11Y-DOC-002 then fails CI until the real tag is written.',
         };
       }
 
@@ -314,21 +307,25 @@ const htmlLangValid: Rule = {
       if (attr.dynamic || attr.quote === '{') continue;
       const raw = attr.value;
       if (raw === null) continue;
-      // lang="" is the legal "unknown language" value, and it is what A11Y-DOC-001's
-      // patch deliberately leaves behind next to its TODO marker. Flagging it here
-      // would report our own marked-for-review state as a second, different error.
-      if (raw.trim() === '') continue;
       if (isPlausibleLanguageTag(raw)) continue;
 
-      const repair = mechanicalLangRepair(raw);
+      const empty = raw.trim() === '';
+      const repair = empty ? undefined : mechanicalLangRepair(raw);
       const fix: Fix =
         repair === undefined
           ? advice(
               'manual',
-              'Replace the language name with its BCP 47 tag.',
-              'Use the two- or three-letter code for this language, optionally with a ' +
-                'region: en, en-GB, pt-BR, zh-Hant. Only a human knows which language ' +
-                '"' + raw + '" was meant to name.',
+              empty
+                ? 'Replace the empty lang with this page\'s BCP 47 tag.'
+                : 'Replace the language name with its BCP 47 tag.',
+              empty
+                ? 'lang="" is the standard "language unknown" value. It is a placeholder, ' +
+                  'not an answer: a screen reader still falls back to the language of the ' +
+                  'listener\'s own system. Write the tag for the language this page is ' +
+                  'actually in: en, en-GB, pt-BR, zh-Hant.'
+                : 'Use the two- or three-letter code for this language, optionally with a ' +
+                  'region: en, en-GB, pt-BR, zh-Hant. Only a human knows which language ' +
+                  '"' + raw + '" was meant to name.',
             )
           : {
               safety: 'review',
@@ -354,7 +351,9 @@ const htmlLangValid: Rule = {
           severity: htmlLangValid.severity,
           start: attr.nameStart,
           end: attr.valueEnd,
-          message: 'lang="' + raw + '" is not a valid language tag.',
+          message: empty
+            ? 'lang="" declares the page language unknown; it names no language.'
+            : 'lang="' + raw + '" is not a valid language tag.',
           impact:
             'Assistive technology cannot match this to a voice, so it keeps whatever ' +
             'voice the user already had — usually their system default. The page is ' +

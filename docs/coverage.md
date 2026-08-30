@@ -6,7 +6,7 @@
 
 ## The short version
 
-A11yFix ships **68 rules** touching **17 of the 55**
+A11yFix ships **69 rules** touching **17 of the 55**
 WCAG 2.2 A and AA success criteria listed here.
 
 **No criterion is fully covered by automation, and this table says "partial" for every
@@ -173,3 +173,4 @@ language are all judgements about intent. The tool marks them and refuses to gue
 | `A11Y-LINK-007` | 4.1.2 | A | Anchor used as a button |
 | `A11Y-LINK-008` | 2.4.4 | A | Fragment link with no target |
 | `A11Y-LINK-009` | — | A | Adjacent duplicate links |
+| `A11Y-TODO-001` | — | A | An A11yFix placeholder is still in the source |

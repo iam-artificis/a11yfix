@@ -47,10 +47,14 @@ test('no fix invents alternative text, link text or a language code', () => {
       // Anything written into an accessible-name position must be an obvious placeholder.
       const namesSomething = /\b(alt|aria-label|title|lang)\s*=/.test(edit.replacement);
       if (!namesSomething) continue;
-      const emptyAlt = /alt\s*=\s*""/.test(edit.replacement);
+      // An empty value invents nothing. alt="" says "this image is decorative" and
+      // lang="" says "language unknown" — both are standard values with defined
+      // meanings, and neither puts words in the author's mouth. Anything with content
+      // in it still has to be an obvious placeholder.
+      const emptyValue = /\b(?:alt|aria-label|title|lang)\s*=\s*""/.test(edit.replacement);
       const marked = edit.replacement.includes(TODO_MARKER);
       assert.ok(
-        emptyAlt || marked,
+        emptyValue || marked,
         `${v.ruleId} wrote a name without a ${TODO_MARKER} marker: ${edit.replacement}`,
       );
     }

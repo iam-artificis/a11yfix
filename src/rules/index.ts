@@ -6,6 +6,7 @@ import { RULES as images } from './images.js';
 import { RULES as keyboard } from './keyboard.js';
 import { RULES as links } from './links.js';
 import { RULES as structure } from './structure.js';
+import { TODO_RULES as todo } from './todo.js';
 
 /**
  * The rule registry.
@@ -22,4 +23,5 @@ export const ALL_RULES: readonly Rule[] = [
   ...aria,
   ...links,
   ...contrast,
+  ...todo,
 ];
