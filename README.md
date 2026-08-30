@@ -62,6 +62,28 @@ Beyond contrast, 68 rules cover images and media alternatives, form labelling, d
 structure, keyboard operability, ARIA correctness, and link semantics — each anchored to
 the WCAG success criterion it implements.
 
+## What a run looks like
+
+Every finding names who is affected, quotes the source, and says what the patch would do
+and what it would achieve.
+
+```
+demo/Card.tsx
+  4:7  error    Text contrast is 2.54:1, below the required 3:1 (#9ca3af on #ffffff). WCAG 1.4.3
+          People with low vision, colour vision deficiency, or anyone reading on a phone
+          in sunlight cannot reliably make out this text.
+          <h2 className="text-gray-400 text-2xl font-bold">
+          fixable (review): Replace text-gray-400 with text-gray-500, reaching 4.83:1.
+          A11Y-COLOR-001
+
+3 findings  (3 errors, 0 warnings)  across 1 file
+0 fixable automatically, 3 fixable with review, 0 need a person.
+Run with --fix to apply, or --diff to preview.
+```
+
+That "reaching 4.83:1" is recomputed from the shade the patch actually writes, not from
+the ideal colour the solver aimed at. It is a number you can check.
+
 ## What it will never do
 
 **It does not invent alt text.** It cannot see the image. A plausible-sounding wrong
