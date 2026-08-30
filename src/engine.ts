@@ -183,6 +183,7 @@ export async function analyseFiles(
       violations: all.length,
       errors: all.filter((v) => v.severity === 'error').length,
       warnings: all.filter((v) => v.severity === 'warning').length,
+      info: all.filter((v) => v.severity === 'info').length,
       automatic: all.filter((v) => v.fix?.safety === 'automatic').length,
       review: all.filter((v) => v.fix?.safety === 'review').length,
       manual: all.filter((v) => v.fix?.safety === 'manual').length,

@@ -115,6 +115,11 @@ const C = {
 const useColor = process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined;
 const c = (code: string, s: string): string => (useColor ? code + s + C.reset : s);
 
+/** "1 file", "2 files" — sloppy plurals in a precision tool read as carelessness. */
+function plural(n: number, one: string, many = one + 's'): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 function severityTag(v: Violation): string {
   if (v.severity === 'error') return c(C.red, 'error  ');
   if (v.severity === 'warning') return c(C.yellow, 'warning');
@@ -151,14 +156,26 @@ function printViolation(v: Violation, opts: Options): void {
 
 function printHuman(summary: RunSummary, opts: Options): void {
   let suppressed = 0;
+  let hiddenInfo = 0;
 
   for (const file of summary.files) {
     if (file.violations.length === 0) continue;
+    // Info findings are things worth knowing, not things to do today. Listed by default
+    // they were 60% of a real run and pushed the errors off the top of the screen.
+    const printable = opts.all ? file.violations : file.violations.filter((v) => v.severity !== 'info');
+    if (printable.length === 0) {
+      hiddenInfo += file.violations.length;
+      continue;
+    }
     console.log(`\n${c(C.bold, file.file)}`);
 
     const shown = new Map<string, number>();
     const held = new Map<string, number>();
     for (const v of file.violations) {
+      if (!opts.all && v.severity === 'info') {
+        hiddenInfo++;
+        continue;
+      }
       const seen = shown.get(v.ruleId) ?? 0;
       if (!opts.all && seen >= PER_RULE_PER_FILE) {
         held.set(v.ruleId, (held.get(v.ruleId) ?? 0) + 1);
@@ -169,7 +186,7 @@ function printHuman(summary: RunSummary, opts: Options): void {
       printViolation(v, opts);
     }
     for (const [ruleId, n] of held) {
-      console.log(`  ${c(C.grey, `… and ${n} more ${ruleId} in this file`)}`);
+      console.log(`  ${c(C.grey, `… and ${plural(n, 'more ' + ruleId)} in this file`)}`);
     }
   }
 
@@ -180,9 +197,12 @@ function printHuman(summary: RunSummary, opts: Options): void {
     console.log(c(C.green, 'No violations found in the checks this tool can perform.'));
   } else {
     console.log(
-      `${c(C.bold, String(t.violations))} findings  ` +
-        `(${c(C.red, `${t.errors} errors`)}, ${c(C.yellow, `${t.warnings} warnings`)})  ` +
-        `across ${filesWithFindings.length} files`,
+      `${c(C.bold, plural(t.violations, 'finding'))}  ` +
+        `(${c(C.red, plural(t.errors, 'error'))}, ${c(C.yellow, plural(t.warnings, 'warning'))}` +
+        // Info findings are counted here so the parts add up to the total. A summary
+        // whose numbers do not reconcile is the first thing a sceptical reader notices.
+        `${t.info > 0 ? `, ${c(C.blue, `${t.info} info`)}` : ''})  ` +
+        `across ${plural(filesWithFindings.length, 'file')}`,
     );
     console.log(
       c(C.grey, `${t.automatic} fixable automatically, ${t.review} fixable with review, ${t.manual} need a person.`),
@@ -215,13 +235,20 @@ function printHuman(summary: RunSummary, opts: Options): void {
       );
     }
 
+    if (hiddenInfo > 0) {
+      console.log(
+        c(C.grey, `\n${plural(hiddenInfo, 'info finding')} not listed. Use --all to see them.`),
+      );
+    }
     if (suppressed > 0) {
-      console.log(c(C.grey, `\n${suppressed} repeated findings were folded into the counts above. Use --all to list them.`));
+      console.log(
+        c(C.grey, `\n${plural(suppressed, 'repeated finding')} folded into the counts above. Use --all to list them.`),
+      );
     }
   }
 
   if (opts.fix) {
-    console.log(c(C.green, `${t.fixed} fixes written.`));
+    console.log(c(C.green, `${plural(t.fixed, 'fix', 'fixes')} written.`));
   } else if (t.automatic + t.review > 0) {
     console.log(c(C.grey, 'Run with --fix to apply, or --diff to preview.'));
   }
@@ -354,6 +381,7 @@ async function main(): Promise<number> {
       violations: all.length,
       errors: all.filter((v) => v.severity === 'error').length,
       warnings: all.filter((v) => v.severity === 'warning').length,
+      info: all.filter((v) => v.severity === 'info').length,
       automatic: all.filter((v) => v.fix?.safety === 'automatic' && v.fix.edits.length > 0).length,
       review: all.filter((v) => v.fix?.safety === 'review' && v.fix.edits.length > 0).length,
       manual: all.filter((v) => v.fix?.safety === 'manual' || v.fix?.advisory !== undefined).length,

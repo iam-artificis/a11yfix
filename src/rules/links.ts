@@ -858,25 +858,44 @@ const anchorAsButton: Rule = {
       const rolePatched = !role.dynamic && role.value.trim().toLowerCase() === 'button';
       const handler = hasClickHandler(el);
 
+      // Two different problems share this shape, and reporting them at the same weight
+      // was drowning the report: 317 findings on one component library, all of them
+      // placeholders in example files, filling the space where real defects should be.
+      //
+      // An anchor with a click handler genuinely is a button written as a link: it is
+      // announced wrong, it is in the link list, and Space scrolls the page instead of
+      // activating it. Those are real defects and stay warnings.
+      //
+      // An anchor with no handler at all is an unfinished link. It navigates to the top
+      // of the page, which is useless but is not a mislabelled control, and calling it
+      // the same thing overstates it.
+      const actsAsButton = handler || rolePatched;
+
       out.push(
         ctx.report({
           ruleId: anchorAsButton.id,
           wcag: anchorAsButton.wcag,
           level: anchorAsButton.level,
-          severity: anchorAsButton.severity,
+          severity: actsAsButton ? 'warning' : 'info',
           start: href.nameStart,
           end: href.valueEnd,
-          message: `Anchor with href="${truncate(value.trim(), 30)}"${handler ? ' and a click handler' : ''} is a button written as a link${rolePatched ? ' with role="button" bolted on' : ''}.`,
-          impact:
-            'A screen reader announces "link" and promises navigation that never happens; the link also appears in the page\'s link list, where it leads nowhere. Unlike a button it ignores the Space key, so a keyboard user who presses Space scrolls the page instead of activating the control.',
+          message: actsAsButton
+            ? `Anchor with href="${truncate(value.trim(), 30)}"${handler ? ' and a click handler' : ''} is a button written as a link${rolePatched ? ' with role="button" bolted on' : ''}.`
+            : `Anchor with href="${truncate(value.trim(), 30)}" and no handler goes nowhere.`,
+          impact: actsAsButton
+            ? 'A screen reader announces "link" and promises navigation that never happens; the link also appears in the page\'s link list, where it leads nowhere. Unlike a button it ignores the Space key, so a keyboard user who presses Space scrolls the page instead of activating the control.'
+            : 'The link appears in a screen reader\'s list of links on the page and leads back to the top of it. A user navigating by link list has to try it to find that out.',
           fix: {
             // No edits and an advisory: this is a human's job, and calling it 'review'
             // would count it among the fixes `--fix --include-review` promises to write.
             safety: 'manual',
             edits: [],
-            description: 'Replace the anchor with a <button type="button">.',
-            advisory:
-              'Change <a href="#"> to <button type="button"> and move the click handler across, then restore the link appearance in CSS (background: none; border: 0; padding: 0). The tool declines to patch this because moving an element changes styling and event wiring it cannot see.',
+            description: actsAsButton
+              ? 'Replace the anchor with a <button type="button">.'
+              : 'Give the link a real destination, or make it a <button>.',
+            advisory: actsAsButton
+              ? 'Change <a href="#"> to <button type="button"> and move the click handler across, then restore the link appearance in CSS (background: none; border: 0; padding: 0). The tool declines to patch this because moving an element changes styling and event wiring it cannot see.'
+              : 'Point href at where this is meant to go. If it is a placeholder in an example, that is fine — but it will be copied into someone\'s application exactly as written.',
           },
         }),
       );

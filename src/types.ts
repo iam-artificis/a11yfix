@@ -117,6 +117,7 @@ export interface RunSummary {
     readonly violations: number;
     readonly errors: number;
     readonly warnings: number;
+    readonly info: number;
     readonly automatic: number;
     readonly review: number;
     readonly manual: number;

@@ -97,7 +97,7 @@ npx a11yfix src --diff                 # preview the patch
 npx a11yfix src --fix                  # apply automatic fixes
 npx a11yfix src --fix --include-review # apply reviewable fixes too
 npx a11yfix . --json                   # machine-readable
-npx a11yfix . --all                    # do not fold repeated findings
+npx a11yfix . --all                    # include info findings and repeats
 npx a11yfix --rules                    # list all 68 rules
 ```
 
