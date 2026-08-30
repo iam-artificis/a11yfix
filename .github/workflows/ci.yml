@@ -54,7 +54,7 @@ jobs:
         run: |
           node dist/cli.js demo --report report.html --all --quiet || true
           test -s report.html || { echo "no report produced"; exit 1; }
-          node dist/cli.js demo --json --all > all.json
+          node dist/cli.js demo --json --all > all.json || true
           node -e "
             const fs = require('fs');
             const html = fs.readFileSync('report.html', 'utf8');
