@@ -21,6 +21,9 @@ import { parseMarkup } from '../dist/parse/markup.js';
  * patch applied cleanly and left a file that no longer parsed.
  */
 
+/** A backtick, built rather than typed: these tests live inside template literals. */
+const tick = String.fromCharCode(96);
+
 const run = (file, source, opts = {}) =>
   analyseSource(file, source, { rules: ALL_RULES, level: 'AA', fixThreshold: 'review', ...opts });
 
@@ -170,6 +173,112 @@ test('a comment or regex in a brace does not hide the attributes after it', () =
   assert.ok(el !== undefined, 'the div should be parsed');
   const names = el.attrs.map((a) => a.nameLower);
   assert.deepEqual(names, ['onclick', 'id'], `attributes lost: ${names.join(', ')}`);
+});
+
+test('a stray backtick in prose does not blank out the rest of the file', () => {
+  // skipTemplate returned source.length for a literal it never found the end of, and the
+  // caller masked that whole span. One backtick in a paragraph therefore hid everything
+  // after it: the <label> below stopped being seen, so its input was reported as
+  // unlabelled — a fabricated error — while every real finding past the backtick
+  // disappeared without a word.
+  const withTick = [
+    'export function Consent() {',
+    '  return (',
+    '    <div>',
+    '      <input id="tos" type="checkbox" />',
+    '      <p>Press ` to jump here.</p>',
+    '      <label htmlFor="tos">I accept the terms</label>',
+    '    </div>',
+    '  );',
+    '}',
+  ].join('\n');
+  const withoutTick = withTick.replace('` ', '');
+
+  const idsFor = (src) => run('Consent.tsx', src).violations.map((v) => v.ruleId).sort();
+  assert.deepEqual(
+    idsFor(withTick),
+    idsFor(withoutTick),
+    'a backtick in prose changed what the analyser can see',
+  );
+  assert.ok(
+    !idsFor(withTick).includes('A11Y-FORM-001'),
+    'the input is labelled two lines below; reporting it unlabelled is fabrication',
+  );
+});
+
+test('a stray backtick does not silence findings that follow it', () => {
+  const src = (prose) =>
+    [
+      'export function Help() {',
+      '  return (',
+      '    <main>',
+      '      <h1>Help</h1>',
+      `      <p>${prose}</p>`,
+      '      <img src="/diagram.png" />',
+      '    </main>',
+      '  );',
+      '}',
+    ].join('\n');
+
+  const clean = run('Help.tsx', src('Use the key.')).violations.map((v) => v.ruleId);
+  const ticked = run('Help.tsx', src(`Use the ${tick} key.`)).violations.map((v) => v.ruleId);
+  assert.ok(clean.includes('A11Y-IMG-001'), 'fixture should report the unlabelled image');
+  assert.deepEqual(ticked.sort(), clean.sort(), 'the backtick swallowed real findings');
+});
+
+test('a template literal that is closed is still masked', () => {
+  // The masking exists for a reason: markup inside a dedent`…` literal is a string, not
+  // a document. Fixing the unterminated case must not stop the terminated one working.
+  const source = [
+    'const html = dedent' + tick + '',
+    '  <img src="a.png">',
+    '' + tick + ';',
+    'export const C = () => <main><h1>x</h1></main>;',
+  ].join('\n');
+  const ids = run('C.tsx', source).violations.map((v) => v.ruleId);
+  assert.ok(!ids.includes('A11Y-IMG-001'), 'markup inside a template literal is a string');
+});
+
+test('an attribute after a very long one is still seen', () => {
+  // parseAttributes stopped at a fixed 20000-character bound and returned a truncated
+  // list with no signal that anything was missing. An inline base64 image is enough to
+  // exceed it, and the alt attribute sitting right after it was reported as absent.
+  const big = 'A'.repeat(20900);
+  const source =
+    '<!doctype html><html lang="en"><head><title>t</title></head><body><main><h1>h</h1>' +
+    `<img src="data:image/png;base64,${big}" alt="Acme company logo">` +
+    '</main></body></html>';
+  const ids = run('page.html', source).violations.map((v) => v.ruleId);
+  assert.ok(
+    !ids.includes('A11Y-IMG-001'),
+    'the alt attribute is in the source; reporting it missing is fabrication',
+  );
+});
+
+test('a long attribute does not lead to a duplicate being written', () => {
+  // The other half: with lang truncated away, --fix wrote a second lang="" beside the
+  // correct one. In JSX a duplicate prop is a type error, and under Babel the later one
+  // wins, so a correct lang="en" was overridden with an empty one.
+  const big = 'A'.repeat(20900);
+  const source =
+    `<!doctype html><html data-theme="${big}" lang="en"><head><title>t</title></head>` +
+    '<body><main><h1>h</h1></main></body></html>';
+  const result = run('page.html', source);
+  const fixed = result.fixedSource ?? source;
+  assert.equal(
+    (fixed.match(/\slang=/g) ?? []).length,
+    1,
+    'the document ended up with more than one lang attribute',
+  );
+});
+
+test('an unterminated tag still cannot run away', () => {
+  // The window has to keep bounding malformed input, or a pathological file becomes a
+  // quadratic scan.
+  const source = '<b '.repeat(20000);
+  const started = Date.now();
+  run('nasty.html', source);
+  assert.ok(Date.now() - started < 2000, 'an unterminated tag took too long to parse');
 });
 
 test('JSX inside an attribute expression stays inside it', () => {

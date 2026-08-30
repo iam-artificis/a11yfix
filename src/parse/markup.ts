@@ -227,8 +227,24 @@ function scanRegex(src: string, start: number): number {
   return -1;
 }
 
-function parseAttributes(src: string, from: number, limit: number): { attrs: Attr[]; end: number } {
+/**
+ * Read a tag's attributes.
+ *
+ * `window` bounds how far we look for the *next* attribute, so an unterminated tag in
+ * malformed input cannot make the scan run to the end of the file. It is deliberately not
+ * a hard cut on the tag: a single value can be longer than the whole window — a 20 KB
+ * base64 `data:` URI is enough — and stopping mid-tag returns a truncated attribute list
+ * with no signal that anything is missing. A rule then reports an attribute that is right
+ * there in the source as absent, and `--fix` writes a duplicate next to it. In JSX a
+ * duplicate prop is a type error, and under Babel the later one wins, so a correct
+ * `lang="en"` was being overridden with `lang=""`.
+ *
+ * So the window slides forward past any value that ended on its own terminator, and only
+ * genuinely unterminated input stops the scan.
+ */
+function parseAttributes(src: string, from: number, window: number): { attrs: Attr[]; end: number } {
   const attrs: Attr[] = [];
+  let limit = Math.min(src.length, from + window);
   let i = from;
 
   while (i < limit) {
@@ -281,9 +297,13 @@ function parseAttributes(src: string, from: number, limit: number): { attrs: Att
     let value: string;
     let quote: QuoteKind;
     let dynamic = false;
+    // Whether the value ended on its own closing delimiter rather than on the window.
+    // Only a well-formed value earns more window.
+    let terminated = true;
 
     if (q === '"' || q === "'") {
       const close = src.indexOf(q, j + 1);
+      terminated = close >= 0;
       valueEnd = close < 0 ? limit : close + 1;
       value = src.slice(j + 1, valueEnd - 1);
       quote = q;
@@ -296,8 +316,10 @@ function parseAttributes(src: string, from: number, limit: number): { attrs: Att
       quote = '{';
       dynamic = true;
     } else {
+      // An unquoted value ends at whitespace, '>' or end of input on its own, so it needs
+      // no window: bounding it here would slice a long one short for no benefit.
       let k = j;
-      while (k < limit && !isSpace(src[k]) && src[k] !== '>' && !(src[k] === '/' && src[k + 1] === '>')) k++;
+      while (k < src.length && !isSpace(src[k]) && src[k] !== '>' && !(src[k] === '/' && src[k + 1] === '>')) k++;
       valueEnd = k;
       value = src.slice(j, k);
       quote = null;
@@ -315,6 +337,10 @@ function parseAttributes(src: string, from: number, limit: number): { attrs: Att
       dynamic,
     });
     i = valueEnd;
+    // A single value can be longer than the whole window. Since it ended on its own
+    // delimiter the tag is still well formed, so slide the window forward rather than
+    // dropping every attribute that comes after it.
+    if (i >= limit && terminated) limit = Math.min(src.length, i + window);
   }
 
   return { attrs, end: i };
@@ -427,8 +453,7 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
     const tagLower = tag.toLowerCase();
 
     // Bound attribute scanning to this tag so a stray '<' in text cannot run away.
-    const searchLimit = Math.min(source.length, k + 20000);
-    const { attrs, end: afterAttrs } = parseAttributes(source, k, searchLimit);
+    const { attrs, end: afterAttrs } = parseAttributes(source, k, 20000);
 
     // An opening tag we could not read to its end is skipped entirely: no element is
     // recorded, so no rule can compute an insertion point inside a span whose extent we
@@ -571,6 +596,17 @@ function templateLiteralRanges(source: string): (readonly [number, number])[] {
     }
     const tag = tagBefore(source, tick);
     const end = skipTemplate(source, tick);
+    if (end < 0) {
+      // No closing backtick anywhere. A file that compiles cannot contain an unterminated
+      // template literal, so this backtick is prose — "Press ` to jump here" inside a
+      // paragraph, most often. Masking from here to the end of the file blanked out the
+      // rest of the component: a <label> after it stopped being seen, so its input was
+      // reported as unlabelled, and every real finding past the backtick disappeared
+      // without a word. One stray character produced a fabricated error and a silent
+      // blackout at the same time.
+      i = tick + 1;
+      continue;
+    }
     // lit-html's html`…` really is markup, so it is left visible.
     if (tag !== 'html') ranges.push([tick, end]);
     i = end;
@@ -595,7 +631,7 @@ function tagBefore(source: string, tick: number): string {
   return source.slice(j + 1, tick);
 }
 
-/** Index just past the closing backtick of the template literal opening at `start`. */
+/** Index just past the closing backtick, or -1 when the literal is never closed. */
 function skipTemplate(source: string, start: number): number {
   let i = start + 1;
   while (i < source.length) {
@@ -611,7 +647,9 @@ function skipTemplate(source: string, start: number): number {
     }
     i++;
   }
-  return source.length;
+  // Never closed. Returning source.length would say "this literal runs to the end of the
+  // file", and the caller would then mask everything after it.
+  return -1;
 }
 
 /** Index just past the `}` closing a \${…} interpolation, honouring nesting. */
