@@ -76,6 +76,18 @@ function pairFor(el: Element, ctx: { palette: import('../design/palette.js').Pal
   return { fg, bg, fgRgb, bgRgb };
 }
 
+/**
+ * Characters that carry no information on their own.
+ *
+ * A `<span>` holding nothing but `&middot;` between two pieces of metadata is a visual
+ * separator, and WCAG 1.4.3 exempts text that is pure decoration. Reporting it is
+ * technically defensible and practically wrong: nobody is going to darken a dot, and a
+ * finding nobody acts on costs the credibility of the ones next to it. A separator inside
+ * a sentence is unaffected — the element's own text is then the whole sentence.
+ */
+const SEPARATOR_ONLY =
+  /^(?:[\s|/\\\u00b7\u2022\u2013\u2014\u2022\u22c5\u2027\u30fb\-]|&(?:middot|bull|bullet|mdash|ndash|sdot|nbsp|#(?:183|8226|8211|8212|160|8901));)+$/i;
+
 /** Does this element render text directly, rather than only through children? */
 function hasOwnText(el: Element): boolean {
   if (NON_TEXT_TAGS.has(el.tagLower)) return false;
@@ -86,7 +98,8 @@ function hasOwnText(el: Element): boolean {
     el.innerSource,
   );
   const own = withoutChildren.replace(/<[^>]*>/g, ' ');
-  if (own.replace(/\{[^}]*\}/g, ' ').trim() !== '') return true;
+  const literal = own.replace(/\{[^}]*\}/g, ' ').trim();
+  if (literal !== '') return !SEPARATOR_ONLY.test(literal);
 
   // A JSX expression is usually the text. `<h2 className="text-gray-400">{title}</h2>`
   // renders a heading, and skipping it because the words are not literal would exclude

@@ -364,3 +364,21 @@ test('a stylesheet is parsed once per run, not once per file', () => {
     `300 files against 40 stylesheets took ${elapsed}ms; the sheets are being re-parsed`,
   );
 });
+
+test('a decorative separator is not text with a contrast problem', () => {
+  // tailwindcss.com: a <span class="text-pink-300">&middot;</span> between two pieces of
+  // metadata. Technically text, practically a bullet, and nobody is going to darken a dot
+  // — a finding nobody acts on costs the credibility of the ones beside it.
+  const source = `<html><body>
+  <div class="bg-white">
+    <span class="text-gray-500">128 reviews</span>
+    <span class="text-pink-300">&middot;</span>
+    <span class="text-pink-300">|</span>
+    <span class="text-pink-300">Bayfield, ON</span>
+  </div>
+</body></html>`;
+  const found = contrastFindings(run('meta.html', source));
+  assert.equal(found.length, 1, 'only the span with real words should be reported');
+  assert.match(found[0].excerpt, /Bayfield|text-pink-300">Bayfield|<span/);
+  assert.ok(found[0].line >= 6, `expected the last span, got line ${found[0].line}`);
+});

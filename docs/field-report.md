@@ -12,7 +12,7 @@ Measured on 2026-08-31 with a11yfix 0.1.0.
 | Repository | Commit | Files | Errors | Warnings | Info | Time |
 |---|---|---|---|---|---|---|
 | `vercel/commerce` | `3761e52` | 45 | 4 | 1 | 1 | 0.08s |
-| `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 27 | 14 | 7 | 0.23s |
+| `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 26 | 14 | 7 | 0.23s |
 | `documenso/documenso` | `5082b47` | 674 | 52 | 14 | 3 | 0.38s |
 | `calcom/cal.com` | `176037d` | 989 | 827 | 542 | 12 | 0.77s |
 | `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 71 | 357 | 1.58s |
@@ -75,6 +75,13 @@ now stops at a positioned overlay that actually paints something, and at gradien
 background images, instead of reporting a pairing that never renders.
 
 Each is a regression test in `test/precision.test.js`.
+
+A sixth came out of checking this table by hand rather than trusting it: a
+`<span class="text-pink-300">&middot;</span>` separator between two pieces of metadata
+was reported at 1.81:1. Technically text, practically a bullet. WCAG 1.4.3 exempts pure
+decoration, nobody is going to darken a dot, and a finding nobody acts on costs the
+credibility of the five beside it. An element whose entire content is separator
+punctuation is now skipped.
 
 ## Two rules that were wrong in principle
 
