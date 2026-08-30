@@ -46,8 +46,33 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run build
-      # The demo directory is a deliberately broken fixture, so it is excluded; the rest
-      # of the repository has no markup, which is the point — this proves the CLI runs
-      # end to end on a real checkout without crashing.
-      - run: node dist/cli.js docs || true
-      - run: node dist/cli.js demo --diff --include-review
+
+      # demo/ is a deliberately broken fixture. A non-zero exit is the CLI reporting that
+      # findings remain, which is the expected result here, so the assertion is on what it
+      # produced rather than on the exit code.
+      - name: The demo produces a patch
+        run: |
+          node dist/cli.js demo --diff --include-review > demo.patch || true
+          test -s demo.patch || { echo "no patch produced for a fixture that should fail"; exit 1; }
+          echo "patch is $(wc -l < demo.patch) lines"
+
+      # The whole promise of the tool in one step: a patch it emitted applies cleanly to
+      # the files it was generated from.
+      - name: The patch applies
+        run: |
+          git apply --check demo.patch
+          git apply demo.patch
+          git diff --stat
+
+      - name: And the patched fixture is clean of what was patched
+        run: |
+          node dist/cli.js demo --json > after.json
+          node -e "
+            const r = require('./after.json');
+            const left = r.byRule.filter(x => x.ruleId === 'A11Y-COLOR-001');
+            if (left.length > 0) {
+              console.error('contrast findings survived their own patch:', JSON.stringify(left));
+              process.exit(1);
+            }
+            console.log('no contrast findings remain');
+          "
