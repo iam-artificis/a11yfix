@@ -125,6 +125,24 @@ npx a11yfix --rules                    # list all 68 rules
 
 Exit code is `1` when any error-severity finding remains, so it works as a CI gate.
 
+## Configuration
+
+`.a11yfixrc.json` in the project root, or an `a11yfix` key in `package.json`. A
+command-line flag always wins over the file.
+
+```json
+{
+  "level": "AA",
+  "ignore": ["apps/web/public/**", "**/*.stories.tsx"],
+  "rules": { "A11Y-LINK-007": "off" }
+}
+```
+
+The same thing from the command line: `--ignore "apps/web/public/**" --disable A11Y-LINK-007`.
+
+Every run prints which config it used, how many files were ignored and how many rules are
+off, so a finding that never appears can be traced to the line that silenced it.
+
 Supported sources: `.html` `.jsx` `.tsx` `.vue` `.svelte` `.astro`, with `.css`/`.scss`
 read for colour resolution. `.ts` and `.js` are deliberately not parsed as markup — they
 usually contain HTML only inside string literals, and reporting on those is noise.

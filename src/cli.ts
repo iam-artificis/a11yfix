@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { FixSafety, Level, RunSummary, Violation } from './types.js';
 import { analyseSource, kindOf, packageRootOf, VERSION } from './engine.js';
+import { isIgnored, loadConfig } from './config.js';
 import { unifiedDiff } from './fix/apply.js';
 import { ALL_RULES } from './rules/index.js';
 import type { StylesheetSource } from './design/palette.js';
@@ -30,6 +31,12 @@ interface Options {
   quiet: boolean;
   listRules: boolean;
   all: boolean;
+  /** Rule ids switched off on the command line, merged with the config file's. */
+  disable: string[];
+  /** Glob patterns from --ignore, merged with the config file's. */
+  ignore: string[];
+  /** Set when --level was passed, so a config file cannot override an explicit flag. */
+  levelFromFlag: boolean;
   /** Files --fix could not write, filled in during the run rather than parsed. */
   writeFailures?: { file: string; reason: string }[];
   help: boolean;
@@ -48,6 +55,9 @@ function parseArgs(argv: readonly string[]): Options {
     quiet: false,
     listRules: false,
     all: false,
+    disable: [],
+    ignore: [],
+    levelFromFlag: false,
     help: false,
     version: false,
     maxFiles: 5000,
@@ -66,7 +76,20 @@ function parseArgs(argv: readonly string[]): Options {
       case '--version': case '-v': o.version = true; break;
       case '--level': {
         const v = argv[++i];
-        if (v === 'A' || v === 'AA' || v === 'AAA') o.level = v;
+        if (v === 'A' || v === 'AA' || v === 'AAA') {
+          o.level = v;
+          o.levelFromFlag = true;
+        }
+        break;
+      }
+      case '--disable': {
+        const v = argv[++i];
+        if (v !== undefined) o.disable.push(...v.split(',').map((x) => x.trim()).filter((x) => x !== ''));
+        break;
+      }
+      case '--ignore': {
+        const v = argv[++i];
+        if (v !== undefined) o.ignore.push(v);
         break;
       }
       case '--max-files': o.maxFiles = Number(argv[++i]) || o.maxFiles; break;
@@ -290,15 +313,28 @@ OPTIONS
   --level A|AA|AAA    Conformance target (default: AA)
   --json              Machine-readable output
   --quiet, -q         One line per finding
+  --all               List info findings and repeats that are folded by default
+  --ignore GLOB       Skip paths matching GLOB (repeatable)
+  --disable IDS       Turn off rules, comma-separated
   --rules             List every rule and exit
   --max-files N       Safety limit on files scanned (default: 5000)
   --version, -v
   --help, -h
 
+CONFIGURATION
+  .a11yfixrc.json in this directory or any ancestor, or an "a11yfix" key in
+  package.json. A command-line flag always wins over the file.
+
+  {
+    "level": "AA",
+    "ignore": ["public/**", "**/*.stories.tsx"],
+    "rules": { "A11Y-LINK-007": "off" }
+  }
+
 EXIT CODES
   0  no errors found
-  1  at least one error-severity finding
-  2  bad usage
+  1  at least one error-severity finding, or a file --fix could not write
+  2  bad usage, or a configuration file that could not be read
 
 A11yFix reports what it can prove from source and refuses to guess. It will never
 invent alt text, link text or a language code, because a plausible-sounding wrong
@@ -320,12 +356,36 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const files: string[] = [];
-  for (const p of opts.paths) {
-    files.push(...(await collectFiles(resolve(p), opts.maxFiles - files.length)));
+  let config;
+  try {
+    config = await loadConfig(process.cwd());
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
   }
+  const configDir = config.source === undefined ? process.cwd() : dirname(config.source.split(' ')[0] as string);
+  // A flag beats a file. Someone typing --level AAA has said what they want more
+  // recently than whoever committed the config.
+  if (!opts.levelFromFlag && config.level !== undefined) opts.level = config.level;
+  const ignore = [...(config.ignore ?? []), ...opts.ignore];
+  const disabled = new Set<string>(opts.disable);
+  for (const [id, setting] of Object.entries(config.rules ?? {})) {
+    if (setting === 'off') disabled.add(id);
+  }
+
+  const collected: string[] = [];
+  for (const p of opts.paths) {
+    collected.push(...(await collectFiles(resolve(p), opts.maxFiles - collected.length)));
+  }
+  const files = collected.filter((f) => !isIgnored(f, ignore, configDir));
+  const ignoredCount = collected.length - files.length;
+
   if (files.length === 0) {
-    console.error('No files to check. Supported: .html .jsx .tsx .vue .svelte .css');
+    console.error(
+      collected.length === 0
+        ? 'No files to check. Supported: .html .jsx .tsx .vue .svelte .astro .css'
+        : `All ${collected.length} matching files were excluded by an ignore pattern.`,
+    );
     return 2;
   }
 
@@ -372,6 +432,7 @@ async function main(): Promise<number> {
       level: opts.level,
       stylesheets: sheets,
       fixThreshold: threshold,
+      disabled,
     });
     results.push({ ...r, absolute: f, source });
   }
@@ -395,6 +456,16 @@ async function main(): Promise<number> {
     byRule: [...byRuleCount.entries()].map(([ruleId, count]) => ({ ruleId, count })).sort((a, b) => b.count - a.count),
     durationMs: 0,
   };
+
+  if (!opts.json && !opts.diff) {
+    // A silent config is a support question waiting to happen: someone will wonder why
+    // a rule they can see in --rules never fires.
+    const notes: string[] = [];
+    if (config.source !== undefined) notes.push(`config: ${relative(process.cwd(), config.source.split(' ')[0] as string) || config.source}`);
+    if (ignoredCount > 0) notes.push(`${plural(ignoredCount, 'file')} ignored`);
+    if (disabled.size > 0) notes.push(`${plural(disabled.size, 'rule')} off`);
+    if (notes.length > 0) console.log(c(C.grey, notes.join('  ·  ')));
+  }
 
   if (opts.diff) {
     let any = false;

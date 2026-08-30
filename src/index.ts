@@ -11,6 +11,9 @@ export type { AnalyseOptions } from './engine.js';
 
 export { ALL_RULES } from './rules/index.js';
 
+export { loadConfig, matchesGlob, isIgnored } from './config.js';
+export type { Config, LoadedConfig } from './config.js';
+
 export { applyEdits, selectEdits, unifiedDiff, fixAllowed } from './fix/apply.js';
 export type { ApplyResult } from './fix/apply.js';
 

@@ -7,6 +7,7 @@ import { importedFrom, isDocumentRootComponent } from '../dist/parse/imports.js'
 import { parseMarkup } from '../dist/parse/markup.js';
 import { resolveTailwindColor } from '../dist/design/tailwind.js';
 import { contrastRatio, parseColor } from '../dist/color.js';
+import { matchesGlob, isIgnored } from '../dist/config.js';
 
 /**
  * Every case here is a false positive this tool actually produced against a real,
@@ -381,4 +382,48 @@ test('a decorative separator is not text with a contrast problem', () => {
   assert.equal(found.length, 1, 'only the span with real words should be reported');
   assert.match(found[0].excerpt, /Bayfield|text-pink-300">Bayfield|<span/);
   assert.ok(found[0].line >= 6, `expected the last span, got line ${found[0].line}`);
+});
+
+test('a glob matches the paths people actually write in an ignore list', () => {
+  const cases = [
+    ['apps/web/public/flags/index.html', 'apps/web/public/**', true],
+    ['apps/web/public/index.html', '**/public/**', true],
+    ['apps/web/src/index.html', '**/public/**', false],
+    ['src/Button.stories.tsx', '**/*.stories.tsx', true],
+    ['src/Button.tsx', '**/*.stories.tsx', false],
+    ['vendor/lib/a.html', 'vendor', true],
+    ['src/vendor/lib/a.html', 'vendor', true],
+    ['src/vendored.html', 'vendor', false],
+    ['a/b/c.html', 'a/*/c.html', true],
+    ['a/b/d/c.html', 'a/*/c.html', false],
+    ['a/b/d/c.html', 'a/**/c.html', true],
+    ['x.html', '**/x.html', true],
+    // Regex metacharacters in a path must not become a pattern.
+    ['src/(app)/page.tsx', 'src/(app)/**', true],
+    ['src/xappx/page.tsx', 'src/(app)/**', false],
+  ];
+  for (const [path, pattern, expected] of cases) {
+    assert.equal(
+      matchesGlob(path, pattern),
+      expected,
+      `${JSON.stringify(pattern)} against ${JSON.stringify(path)}`,
+    );
+  }
+});
+
+test('ignore patterns are resolved against the config, not the working directory', () => {
+  assert.equal(isIgnored('/repo/apps/web/public/a.html', ['apps/web/public/**'], '/repo'), true);
+  assert.equal(isIgnored('/repo/apps/web/src/a.html', ['apps/web/public/**'], '/repo'), false);
+  assert.equal(isIgnored('/repo/a.html', [], '/repo'), false);
+});
+
+test('a rule turned off produces no findings', () => {
+  const source = `<html><body><img src="a.png"><p style="color:#bbb">hi</p></body></html>`;
+  const all = run('t.html', source);
+  assert.ok(all.violations.some((v) => v.ruleId === 'A11Y-IMG-001'));
+
+  const off = run('t.html', source, { disabled: new Set(['A11Y-IMG-001']) });
+  assert.ok(!off.violations.some((v) => v.ruleId === 'A11Y-IMG-001'));
+  // Disabling one rule must not disturb the others.
+  assert.ok(off.violations.some((v) => v.ruleId === 'A11Y-COLOR-001'));
 });
