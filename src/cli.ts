@@ -30,6 +30,8 @@ interface Options {
   quiet: boolean;
   listRules: boolean;
   all: boolean;
+  /** Files --fix could not write, filled in during the run rather than parsed. */
+  writeFailures?: { file: string; reason: string }[];
   help: boolean;
   version: boolean;
   maxFiles: number;
@@ -249,6 +251,9 @@ function printHuman(summary: RunSummary, opts: Options): void {
 
   if (opts.fix) {
     console.log(c(C.green, `${plural(t.fixed, 'fix', 'fixes')} written.`));
+    for (const f of opts.writeFailures ?? []) {
+      console.log(c(C.red, `could not write ${f.file}: ${f.reason}`));
+    }
   } else if (t.automatic + t.review > 0) {
     console.log(c(C.grey, 'Run with --fix to apply, or --diff to preview.'));
   }
@@ -375,7 +380,7 @@ async function main(): Promise<number> {
   const byRuleCount = new Map<string, number>();
   for (const v of all) byRuleCount.set(v.ruleId, (byRuleCount.get(v.ruleId) ?? 0) + 1);
 
-  const summary: RunSummary = {
+  const summary: { -readonly [K in keyof RunSummary]: RunSummary[K] } = {
     files: results,
     totals: {
       violations: all.length,
@@ -402,10 +407,25 @@ async function main(): Promise<number> {
     return summary.totals.errors > 0 ? 1 : 0;
   }
 
+  // Writing is the only thing this tool does that a user cannot undo by closing the
+  // terminal, so a failure part-way through has to be reported rather than thrown. An
+  // unhandled rejection here would leave some files rewritten, some not, and a stack
+  // trace instead of a list of which was which.
+  const writeFailures: { file: string; reason: string }[] = [];
   if (opts.fix) {
     for (const r of results) {
       if (r.fixedSource === undefined || r.fixedSource === r.source) continue;
-      await writeFile(r.absolute, r.fixedSource, 'utf8');
+      try {
+        await writeFile(r.absolute, r.fixedSource, 'utf8');
+      } catch (err) {
+        writeFailures.push({
+          file: r.file,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        // The findings for this file were counted as fixed when the edits were applied
+        // in memory; on disk nothing changed, and the summary must say so.
+        summary.totals = { ...summary.totals, fixed: summary.totals.fixed - r.appliedFixes };
+      }
     }
   }
 
@@ -424,9 +444,12 @@ async function main(): Promise<number> {
     };
     console.log(JSON.stringify(json, null, 2));
   } else {
-    printHuman(summary, opts);
+    printHuman(summary, { ...opts, writeFailures });
   }
 
+  // A failed write is a failed run even if the findings themselves were only warnings:
+  // the user asked for files to change and some did not.
+  if (writeFailures.length > 0) return 1;
   return summary.totals.errors > 0 ? 1 : 0;
 }
 
