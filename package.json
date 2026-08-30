@@ -37,7 +37,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node scripts/test.mjs",
+    "test": "npm run build && node scripts/check-chars.mjs && node scripts/test.mjs",
+    "check-chars": "node scripts/check-chars.mjs",
     "prepublishOnly": "npm run build",
     "docs": "npm run build && node scripts/gen-coverage.mjs"
   },

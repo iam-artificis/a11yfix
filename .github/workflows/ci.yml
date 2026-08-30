@@ -47,6 +47,36 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      # The report is the only output a non-developer ever sees. Its two promises are
+      # that it opens with nothing fetched and that it accounts for every finding, so
+      # both are checked rather than asserted in the README.
+      - name: The report is self-contained and complete
+        run: |
+          node dist/cli.js demo --report report.html --all --quiet || true
+          test -s report.html || { echo "no report produced"; exit 1; }
+          node dist/cli.js demo --json --all > all.json
+          node -e "
+            const fs = require('fs');
+            const html = fs.readFileSync('report.html', 'utf8');
+            const run = JSON.parse(fs.readFileSync('all.json', 'utf8'));
+            const findings = run.files.flatMap(f => f.violations);
+
+            for (const tag of [/<script/i, /<link\b/i, /<img\b/i]) {
+              if (tag.test(html)) { console.error('report fetches something:', tag); process.exit(1); }
+            }
+            for (const url of html.match(/https?:\/\/[^\"'\s<)]+/g) ?? []) {
+              if (!url.startsWith('https://www.w3.org/')) {
+                console.error('unexpected external reference:', url); process.exit(1);
+              }
+            }
+            const missing = [...new Set(findings.map(f => f.ruleId))].filter(id => !html.includes(id));
+            if (missing.length > 0) {
+              console.error('rules reported but absent from the report:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('report covers ' + findings.length + ' findings, fetches nothing');
+          "
+
       # demo/ is a deliberately broken fixture. A non-zero exit is the CLI reporting that
       # findings remain, which is the expected result here, so the assertion is on what it
       # produced rather than on the exit code.

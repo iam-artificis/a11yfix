@@ -83,27 +83,76 @@ function isSpace(ch: string | undefined): boolean {
 
 /**
  * Scan a balanced brace expression starting at `start` (which must be '{').
- * Strings and nested braces are skipped so that `{cond ? "a}b" : {x:1}}` is handled.
+ *
+ * Returns the offset just past the closing brace, or `-1` when the expression could not
+ * be read to its end.
+ *
+ * The sentinel matters more than the scanning. This function used to return
+ * `src.length` when the braces never balanced, which reads as "the expression runs to
+ * the end of the file" — and every caller believed it. A JSX attribute containing an
+ * ordinary apostrophe in a comment,
+ *
+ *     onClick={() => {
+ *       // don't submit twice
+ *       submit();
+ *     }}
+ *
+ * left the scanner inside a string it never left, so the element's opening tag was
+ * recorded as reaching the last character of the module. The rules then inserted
+ * `role="button"` at `openEnd - 1`, which is the file's final `}`, and `--fix` wrote a
+ * file that no longer parses. Every element nested inside the swallowed span went
+ * unreported at the same time.
+ *
+ * So: comments and regex literals are understood, a single- or double-quoted string
+ * cannot span a line, and anything still unbalanced at the end is reported as a failure
+ * rather than as a very long expression.
  */
 function scanBraces(src: string, start: number): number {
   let depth = 0;
   let i = start;
   let quote: string | null = null;
+
   while (i < src.length) {
     const ch = src[i] as string;
+
     if (quote !== null) {
-      if (ch === '\\') i += 2;
-      else {
-        if (ch === quote) quote = null;
-        i++;
+      if (ch === '\\') {
+        i += 2;
+        continue;
       }
+      if (ch === quote) quote = null;
+      // A ' or " string cannot span a line. Without this a lone apostrophe leaves the
+      // scanner quoted for the rest of the file.
+      else if (ch === '\n' && quote !== '`') quote = null;
+      i++;
       continue;
     }
+
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      if (nl < 0) return -1;
+      i = nl + 1;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {
+      const close = src.indexOf('*/', i + 2);
+      if (close < 0) return -1;
+      i = close + 2;
+      continue;
+    }
+    if (ch === '/' && startsRegex(src, i)) {
+      const end = scanRegex(src, i);
+      if (end < 0) return -1;
+      i = end;
+      continue;
+    }
+
     if (ch === '"' || ch === "'" || ch === '`') {
       quote = ch;
       i++;
       continue;
     }
+
     if (ch === '{') depth++;
     else if (ch === '}') {
       depth--;
@@ -111,7 +160,71 @@ function scanBraces(src: string, start: number): number {
     }
     i++;
   }
-  return src.length;
+
+  // Unbalanced: say we could not read it rather than claiming it reaches the end.
+  return -1;
+}
+
+/**
+ * Whether the '/' at `i` opens a regex literal rather than being division or JSX.
+ *
+ * An allowlist, not a denylist. A regex can only begin where a value is expected, and the
+ * things a value can follow are few enough to list: an operator, a comma, an opening
+ * bracket, or one of a handful of keywords. Everything else — a closing quote, a closing
+ * bracket, an identifier, a digit — means division.
+ *
+ * The denylist version of this got `target="_blank" />` wrong: the character before the
+ * slash is a quote, which is not an identifier, so it read as a value position and the
+ * scanner went looking for the end of a regex that was really a self-closing tag. Every
+ * JSX element passed through an attribute expression (`render={<a ... />}`) then failed
+ * to parse, and the tags around it were reported as unreadable.
+ */
+function startsRegex(src: string, i: number): boolean {
+  // Never inside JSX punctuation: '/>' closes a tag and '</' opens a closing one.
+  if (src[i + 1] === '>') return false;
+  let j = i - 1;
+  while (j >= 0 && isSpace(src[j])) j--;
+  if (j < 0) return true;
+  const prev = src[j] as string;
+  if (prev === '<') return false;
+  if (VALUE_POSITION.has(prev)) return true;
+  // `return /x/` and `typeof /x/` are patterns despite ending in a letter.
+  const word = /[A-Za-z0-9_$]+$/.exec(src.slice(Math.max(0, j - 12), j + 1));
+  return word !== null && KEYWORDS_BEFORE_REGEX.has(word[0]);
+}
+
+/** Characters after which a value — and so a regex literal — may begin. */
+const VALUE_POSITION = new Set([
+  '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^',
+]);
+
+const KEYWORDS_BEFORE_REGEX = new Set([
+  'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+  'case', 'do', 'else', 'yield', 'await',
+]);
+
+/** End of the regex literal starting at `start`, or -1 if it is unterminated. */
+function scanRegex(src: string, start: number): number {
+  let i = start + 1;
+  let inClass = false;
+  while (i < src.length) {
+    const ch = src[i] as string;
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    // An unterminated regex cannot cross a line, so a newline means we misread it.
+    if (ch === '\n') return -1;
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) {
+      i++;
+      while (i < src.length && /[a-z]/.test(src[i] as string)) i++;
+      return i;
+    }
+    i++;
+  }
+  return -1;
 }
 
 function parseAttributes(src: string, from: number, limit: number): { attrs: Attr[]; end: number } {
@@ -126,7 +239,9 @@ function parseAttributes(src: string, from: number, limit: number): { attrs: Att
 
     // A bare JSX spread ({...props}) carries no name; skip it without losing our place.
     if (ch === '{') {
-      i = scanBraces(src, i);
+      const next = scanBraces(src, i);
+      if (next < 0) return { attrs, end: -1 };
+      i = next;
       continue;
     }
     if (!NAME_START.test(ch) && ch !== '@' && ch !== ':' && ch !== '#') {
@@ -176,6 +291,7 @@ function parseAttributes(src: string, from: number, limit: number): { attrs: Att
       dynamic = name.startsWith(':') || name.startsWith('@') || name.startsWith('v-');
     } else if (q === '{') {
       valueEnd = scanBraces(src, j);
+      if (valueEnd < 0) return { attrs, end: -1 };
       value = src.slice(j + 1, Math.max(j + 1, valueEnd - 1));
       quote = '{';
       dynamic = true;
@@ -313,6 +429,16 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
     // Bound attribute scanning to this tag so a stray '<' in text cannot run away.
     const searchLimit = Math.min(source.length, k + 20000);
     const { attrs, end: afterAttrs } = parseAttributes(source, k, searchLimit);
+
+    // An opening tag we could not read to its end is skipped entirely: no element is
+    // recorded, so no rule can compute an insertion point inside a span whose extent we
+    // do not know. Scanning resumes just after the '<', so anything nested inside is
+    // still found. A missed finding is the correct failure here; a patch written at a
+    // guessed offset is not.
+    if (afterAttrs < 0) {
+      i = lt + 1;
+      continue;
+    }
 
     let p = afterAttrs;
     while (p < source.length && isSpace(source[p])) p++;
