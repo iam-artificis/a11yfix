@@ -1,6 +1,6 @@
 import type { Element, ParsedMarkup } from '../parse/markup.js';
 import { getAttr } from '../parse/markup.js';
-import { asSimpleSelector, isBoldWeight, lengthToPx, parseCss, parseInlineStyle } from '../parse/css.js';
+import { asSimpleSelector, isBoldWeight, lengthToPx, parseCss, parseInlineStyle, relativeFontFactor } from '../parse/css.js';
 import type { CssRule, Declaration } from '../parse/css.js';
 import { resolveTailwindClasses } from './tailwind.js';
 import { flatten, parseColor, toHex } from '../color.js';
@@ -55,6 +55,15 @@ interface ElementStyle {
   /** Something is painted behind the text and we cannot reduce it to a colour. */
   backgroundUnknown?: boolean;
   fontSizePx?: number;
+  /**
+   * A font-size declared as a multiple of the parent's — `2em`, `150%`. Recorded rather
+   * than dropped: without it the inheritance walk sails past this element and adopts an
+   * ancestor's pixels as if they were its own, so a 24px callout was judged against the
+   * 4.5:1 threshold for small text and reported as failing when it passes.
+   */
+  fontSizeFactor?: number;
+  /** A font-size was declared in a unit we cannot resolve at all (vw, calc, clamp). */
+  fontSizeUnknown?: boolean;
   bold?: boolean;
 }
 
@@ -183,15 +192,36 @@ export class Palette {
     const classAttr = getAttr(el, 'class') ?? getAttr(el, 'className');
     const classes = classAttr?.dynamic === true ? [] : (classAttr?.value ?? '').split(/\s+/).filter((c) => c !== '');
     const idAttr = getAttr(el, 'id');
+
+    // Applied weakest selector first, because `absorb` lets each later rule overwrite the
+    // one before it. Source order alone is not the cascade: `#alert { color:#111 }`
+    // followed by `.hint { color:#ccc }` renders as #111 in every browser, and taking the
+    // later rule reported 1.61:1 on text the page draws at 18.9:1. External sheets are
+    // also all collected before embedded <style> rules, so source order was doubly wrong.
+    //
+    // Only the three simple selector shapes reach here, so the full specificity triple
+    // collapses to one rank. Sort is stable, which leaves source order as the tie-break
+    // between selectors of equal weight — which is what the cascade says.
+    const SPECIFICITY = { tag: 0, class: 1, id: 2 } as const;
+    const matched: { rank: number; rule: CssRule }[] = [];
     for (const rule of this.cssRules) {
-      const matches = rule.selectors.some((sel) => {
+      let rank = -1;
+      for (const sel of rule.selectors) {
         const simple = asSimpleSelector(sel);
-        if (simple === null) return false;
-        if (simple.kind === 'class') return classes.includes(simple.name);
-        if (simple.kind === 'id') return idAttr?.value === simple.name;
-        return simple.name === el.tagLower;
-      });
-      if (!matches) continue;
+        if (simple === null) continue;
+        const hit =
+          simple.kind === 'class'
+            ? classes.includes(simple.name)
+            : simple.kind === 'id'
+              ? idAttr?.value === simple.name
+              : simple.name === el.tagLower;
+        // A rule may list several selectors; the one that matches most specifically wins.
+        if (hit) rank = Math.max(rank, SPECIFICITY[simple.kind]);
+      }
+      if (rank >= 0) matched.push({ rank, rule });
+    }
+    matched.sort((a, b) => a.rank - b.rank);
+    for (const { rule } of matched) {
       this.absorb(out, rule.declarations, el, 'stylesheet', this.embeddedRules.has(rule) ? this.file : undefined);
     }
 
@@ -265,7 +295,13 @@ export class Palette {
         }
       } else if (d.prop === 'font-size') {
         const px = lengthToPx(d.value);
+        const factor = px === undefined ? relativeFontFactor(d.value) : undefined;
+        delete out.fontSizePx;
+        delete out.fontSizeFactor;
+        delete out.fontSizeUnknown;
         if (px !== undefined) out.fontSizePx = px;
+        else if (factor !== undefined) out.fontSizeFactor = factor;
+        else out.fontSizeUnknown = true;
       } else if (d.prop === 'font-weight') {
         out.bold = isBoldWeight(d.value);
       }
@@ -387,14 +423,22 @@ export class Palette {
    */
   typographyFor(el: Element): Typography {
     let size: number | undefined;
+    // Multiples collected on the way up, applied to the first absolute size found.
+    // `0.9em` inside `2em` inside `12px` is 21.6px, and each step has to be kept.
+    const factors: number[] = [];
+    let unknown = false;
     let bold: boolean | undefined;
     let node: Element | null = el;
     let depth = 0;
     while (node !== null && depth < 64) {
       const own = this.styles.get(node);
-      if (size === undefined && own?.fontSizePx !== undefined) size = own.fontSizePx;
+      if (size === undefined && !unknown) {
+        if (own?.fontSizePx !== undefined) size = own.fontSizePx;
+        else if (own?.fontSizeFactor !== undefined) factors.push(own.fontSizeFactor);
+        else if (own?.fontSizeUnknown === true) unknown = true;
+      }
       if (bold === undefined && own?.bold !== undefined) bold = own.bold;
-      if (size !== undefined && bold !== undefined) break;
+      if ((size !== undefined || unknown) && bold !== undefined) break;
       node = node.parent;
       depth++;
     }
@@ -403,9 +447,16 @@ export class Palette {
       h1: 32, h2: 24, h3: 18.72, h4: 16, h5: 13.28, h6: 10.72,
     };
     const tagDefault = headingDefaults[el.tagLower];
-    const certain = size !== undefined || tagDefault !== undefined;
+
+    // The element's own relative sizes multiply whatever absolute size the walk found.
+    // Without a base there is nothing to multiply, and the size stays unknown rather than
+    // being assumed: guessing 16px is what makes a checker confidently wrong.
+    const base = size ?? (factors.length > 0 ? undefined : tagDefault);
+    const resolved =
+      size !== undefined ? factors.reduce((n, f) => n * f, size) : tagDefault;
+    const certain = !unknown && resolved !== undefined;
     return {
-      fontSizePx: size ?? tagDefault ?? 16,
+      fontSizePx: resolved ?? base ?? 16,
       bold: bold ?? (tagDefault !== undefined),
       certain,
     };

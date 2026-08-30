@@ -287,6 +287,21 @@ export function lengthToPx(value: string, rootPx = 16): number | undefined {
   }
 }
 
+/**
+ * A font-size expressed as a multiple of the parent's, or undefined when it is not one.
+ *
+ * `lengthToPx` cannot answer for `em` and `%` because it has no element to look up
+ * from. The caller does, so it gets the factor and does the multiplying: 2em on a 12px
+ * parent is 24px, which is large text and needs 3:1 rather than 4.5:1.
+ */
+export function relativeFontFactor(value: string): number | undefined {
+  const m = /^(-?\d*\.?\d+)(em|%)$/.exec(value.trim());
+  if (m === null) return undefined;
+  const n = parseFloat(m[1] as string);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return m[2] === '%' ? n / 100 : n;
+}
+
 /** Is this font-weight bold enough for WCAG's "large bold text" allowance? */
 export function isBoldWeight(value: string): boolean {
   const v = value.trim().toLowerCase();
