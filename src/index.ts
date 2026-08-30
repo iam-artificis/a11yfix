@@ -15,6 +15,14 @@ export { loadConfig, matchesGlob, isIgnored } from './config.js';
 export { findSuppressions, applySuppressions } from './suppress.js';
 export type { Suppression } from './suppress.js';
 export type { Config, LoadedConfig } from './config.js';
+export {
+  fingerprint,
+  buildBaseline,
+  writeBaseline,
+  readBaseline,
+  compareToBaseline,
+} from './baseline.js';
+export type { BaselineFile, BaselineComparison } from './baseline.js';
 
 export { applyEdits, selectEdits, unifiedDiff, fixAllowed } from './fix/apply.js';
 export type { ApplyResult } from './fix/apply.js';

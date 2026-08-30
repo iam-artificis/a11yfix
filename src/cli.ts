@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { FixSafety, Level, RunSummary, Violation } from './types.js';
 import { analyseSource, kindOf, packageRootOf, VERSION } from './engine.js';
 import { isIgnored, loadConfig } from './config.js';
+import { buildBaseline, compareToBaseline, readBaseline, writeBaseline } from './baseline.js';
 import { unifiedDiff } from './fix/apply.js';
 import { ALL_RULES } from './rules/index.js';
 import type { StylesheetSource } from './design/palette.js';
@@ -21,6 +22,8 @@ const SKIP_DIRS = new Set([
   'coverage', '.turbo', 'vendor', '__pycache__', '.venv', 'target', '.cache', 'storybook-static',
 ]);
 
+const DEFAULT_BASELINE = '.a11yfix-baseline.json';
+
 interface Options {
   paths: string[];
   level: Level;
@@ -33,6 +36,10 @@ interface Options {
   all: boolean;
   /** Rule ids switched off on the command line, merged with the config file's. */
   disable: string[];
+  /** Path to a baseline to compare against, or to write with --baseline-write. */
+  baseline?: string;
+  baselineEnabled: boolean;
+  baselineWrite: boolean;
   /** Glob patterns from --ignore, merged with the config file's. */
   ignore: string[];
   /** Set when --level was passed, so a config file cannot override an explicit flag. */
@@ -56,6 +63,8 @@ function parseArgs(argv: readonly string[]): Options {
     listRules: false,
     all: false,
     disable: [],
+    baselineEnabled: false,
+    baselineWrite: false,
     ignore: [],
     levelFromFlag: false,
     help: false,
@@ -79,6 +88,27 @@ function parseArgs(argv: readonly string[]): Options {
         if (v === 'A' || v === 'AA' || v === 'AAA') {
           o.level = v;
           o.levelFromFlag = true;
+        }
+        break;
+      }
+      case '--baseline': {
+        // The path is optional. Consuming the next argument unconditionally turned
+        // `--baseline --quiet` into an attempt to read a baseline called "--quiet".
+        o.baselineEnabled = true;
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith('-')) {
+          o.baseline = next;
+          i++;
+        }
+        break;
+      }
+      case '--baseline-write': {
+        o.baselineWrite = true;
+        // The path is optional; without one the conventional filename is used.
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith('-')) {
+          o.baseline = next;
+          i++;
         }
         break;
       }
@@ -336,10 +366,19 @@ OPTIONS
   --all               List info findings and repeats that are folded by default
   --ignore GLOB       Skip paths matching GLOB (repeatable)
   --disable IDS       Turn off rules, comma-separated
+  --baseline [PATH]   Report only findings absent from the baseline
+  --baseline-write    Record current findings as the baseline and exit
   --rules             List every rule and exit
   --max-files N       Safety limit on files scanned (default: 5000)
   --version, -v
   --help, -h
+
+ADOPTING ON AN EXISTING PROJECT
+  a11yfix . --baseline-write     # record what is already there, commit the file
+  a11yfix . --baseline           # in CI: fail only on findings that are new
+
+  Findings are matched by rule, file and the shape of the code, not by line
+  number, so unrelated edits do not make an old finding look new.
 
 CONFIGURATION
   .a11yfixrc.json in this directory or any ancestor, or an "a11yfix" key in
@@ -457,6 +496,49 @@ async function main(): Promise<number> {
     results.push({ ...r, absolute: f, source });
   }
 
+  const baselinePath = opts.baseline ?? DEFAULT_BASELINE;
+  let baselineNote: string | undefined;
+
+  if (opts.baselineWrite) {
+    const found = results.flatMap((r) => r.violations);
+    // Stamped with the run's own clock rather than left undated: a baseline whose age
+    // nobody can see is one nobody questions.
+    await writeBaseline(baselinePath, buildBaseline(found, new Date().toISOString()));
+    console.log(
+      c(C.green, `Baseline written to ${baselinePath}: ${found.length} existing findings.`),
+    );
+    console.log(
+      c(C.grey, 'Commit it. Future runs with --baseline will report only what is new.'),
+    );
+    return 0;
+  }
+
+  if (opts.baselineEnabled) {
+    let baseline;
+    try {
+      baseline = await readBaseline(baselinePath);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      console.error('Create one with: a11yfix . --baseline-write');
+      return 2;
+    }
+    let matched = 0;
+    let resolved = 0;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i] as (typeof results)[number];
+      const cmp = compareToBaseline(r.violations, baseline);
+      // Each file is compared against the whole baseline, and the fingerprint carries the
+      // file name, so entries cannot leak between files.
+      results[i] = { ...r, violations: cmp.fresh };
+      matched += cmp.matched;
+    }
+    const totalKnown = Object.values(baseline.entries).reduce((n, k) => n + k, 0);
+    resolved = totalKnown - matched;
+    baselineNote =
+      `baseline ${baselinePath}: ${matched} known findings hidden` +
+      (resolved > 0 ? `, ${resolved} since fixed — rerun --baseline-write to shrink it` : '');
+  }
+
   const all = results.flatMap((r) => r.violations);
   const byRuleCount = new Map<string, number>();
   for (const v of all) byRuleCount.set(v.ruleId, (byRuleCount.get(v.ruleId) ?? 0) + 1);
@@ -484,6 +566,7 @@ async function main(): Promise<number> {
     if (config.source !== undefined) notes.push(`config: ${relative(process.cwd(), config.source.split(' ')[0] as string) || config.source}`);
     if (ignoredCount > 0) notes.push(`${plural(ignoredCount, 'file')} ignored`);
     if (disabled.size > 0) notes.push(`${plural(disabled.size, 'rule')} off`);
+    if (baselineNote !== undefined) notes.push(baselineNote);
     if (notes.length > 0) console.log(c(C.grey, notes.join('  ·  ')));
   }
 

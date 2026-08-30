@@ -121,9 +121,31 @@ npx a11yfix src --fix --include-review # apply reviewable fixes too
 npx a11yfix . --json                   # machine-readable
 npx a11yfix . --all                    # include info findings and repeats
 npx a11yfix --rules                    # list all 68 rules
+npx a11yfix . --baseline-write         # record existing findings, then gate on new ones
+npx a11yfix . --baseline               # report only what is not in the baseline
 ```
 
 Exit code is `1` when any error-severity finding remains, so it works as a CI gate.
+
+## Adopting on a project that already has findings
+
+The first run on an existing application is not going to be zero. A real one produced
+1381 findings, and nobody fixes 1381 things before merging the next feature. Record them
+once and gate on the difference:
+
+```bash
+npx a11yfix . --baseline-write   # writes .a11yfix-baseline.json — commit it
+npx a11yfix . --baseline         # in CI: exit 1 only on findings that are not in it
+```
+
+Findings are matched by rule, file and the *shape* of the code — whitespace collapsed,
+quotes unified — never by line number. Editing lines above a finding, or running the
+file through a formatter, does not make it look new. A second copy of an already-known
+violation is known; a third is new.
+
+When findings in the baseline stop occurring, the run says so and suggests rewriting it,
+so the file shrinks as the codebase improves instead of quietly accumulating permission
+to regress.
 
 ## Configuration
 
