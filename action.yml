@@ -1,0 +1,106 @@
+name: A11yFix
+description: Find accessibility violations in source code and produce a patch for the ones that have an arithmetic answer.
+author: A11yFix contributors
+
+branding:
+  icon: eye
+  color: purple
+
+inputs:
+  path:
+    description: Directory or file to check.
+    required: false
+    default: '.'
+  mode:
+    description: >-
+      What to do with the findings. "comment" posts them on the pull request and always
+      succeeds. "fail" exits non-zero when an error-severity finding remains, gating the
+      build. "pr" opens a follow-up pull request containing the fixes.
+    required: false
+    default: comment
+  level:
+    description: WCAG conformance level to check against — A, AA or AAA.
+    required: false
+    default: AA
+  include-review:
+    description: >-
+      In "pr" mode, also apply fixes marked "review" — correct in the common case and
+      worth a human glance. Off by default; only provably context-free fixes are applied.
+    required: false
+    default: 'false'
+  version:
+    description: Version of the a11yfix package to run. Pin this.
+    required: false
+    default: latest
+  token:
+    description: >-
+      Token used to comment or open a pull request. The default GITHUB_TOKEN is enough
+      for "comment" and "fail"; "pr" needs a token with contents and pull-requests write.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  errors:
+    description: Number of error-severity findings.
+    value: ${{ steps.run.outputs.errors }}
+  warnings:
+    description: Number of warnings.
+    value: ${{ steps.run.outputs.warnings }}
+  fixable:
+    description: Number of findings a patch is available for.
+    value: ${{ steps.run.outputs.fixable }}
+  report:
+    description: Path to the JSON report.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check inputs
+      shell: bash
+      run: |
+        case "${{ inputs.mode }}" in
+          comment|fail|pr) ;;
+          *) echo "::error::mode must be one of: comment, fail, pr (got '${{ inputs.mode }}')"; exit 1 ;;
+        esac
+
+    - name: Analyse
+      id: run
+      shell: bash
+      env:
+        A11YFIX_PATH: ${{ inputs.path }}
+        A11YFIX_LEVEL: ${{ inputs.level }}
+        A11YFIX_VERSION: ${{ inputs.version }}
+      run: node "${{ github.action_path }}/action/analyse.mjs"
+
+    - name: Comment on the pull request
+      if: inputs.mode == 'comment' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        A11YFIX_REPORT: ${{ steps.run.outputs.report }}
+        A11YFIX_PR: ${{ github.event.pull_request.number }}
+        A11YFIX_REPO: ${{ github.repository }}
+      run: node "${{ github.action_path }}/action/comment.mjs"
+
+    - name: Open a pull request with the fixes
+      if: inputs.mode == 'pr'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        A11YFIX_PATH: ${{ inputs.path }}
+        A11YFIX_LEVEL: ${{ inputs.level }}
+        A11YFIX_VERSION: ${{ inputs.version }}
+        A11YFIX_INCLUDE_REVIEW: ${{ inputs.include-review }}
+      run: node "${{ github.action_path }}/action/open-pr.mjs"
+
+    - name: Gate the build
+      if: inputs.mode == 'fail'
+      shell: bash
+      run: |
+        errors="${{ steps.run.outputs.errors }}"
+        if [ "${errors:-0}" -gt 0 ]; then
+          echo "::error::${errors} error-severity accessibility findings remain."
+          exit 1
+        fi
+        echo "No error-severity accessibility findings."

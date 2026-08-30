@@ -1,0 +1,8 @@
+# Normalise to LF in the repository and on checkout.
+#
+# Not cosmetic: the patch this tool emits is compared byte-for-byte against the file it
+# was generated from, and a checkout that silently rewrites line endings would make the
+# test suite fail for reasons that have nothing to do with the code.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

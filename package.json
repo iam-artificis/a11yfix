@@ -1,0 +1,57 @@
+{
+  "name": "a11yfix",
+  "version": "0.1.0",
+  "description": "Fix accessibility violations in your source code. Produces a diff you can read, not a compliance claim you have to trust.",
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "eaa",
+    "ada",
+    "codemod",
+    "autofix",
+    "contrast",
+    "jsx",
+    "html"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "a11yfix": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js",
+    "prepublishOnly": "npm run build",
+    "docs": "npm run build && node scripts/gen-coverage.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iam-artificis/a11yfix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iam-artificis/a11yfix/issues"
+  },
+  "homepage": "https://github.com/iam-artificis/a11yfix#readme"
+}

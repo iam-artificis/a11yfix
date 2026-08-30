@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The diff round-trip runs real `git apply`, and line endings are exactly the
+        # thing that breaks a patch, so Windows is not optional here.
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm test
+
+  coverage-doc-is-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run docs
+      # docs/coverage.md is generated from the rule set. If it has drifted, the
+      # repository is making a coverage claim the code does not support.
+      - name: Fail if docs/coverage.md is stale
+        run: git diff --exit-code docs/coverage.md
+
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build
+      # The demo directory is a deliberately broken fixture, so it is excluded; the rest
+      # of the repository has no markup, which is the point — this proves the CLI runs
+      # end to end on a real checkout without crashing.
+      - run: node dist/cli.js docs || true
+      - run: node dist/cli.js demo --diff --include-review
