@@ -139,6 +139,10 @@ opens offline, prints, and survives being emailed. It groups findings by rule, n
 file and line for every one of them, quotes the source that triggered it, and links each
 rule to the W3C's own page for the criterion it belongs to.
 
+By default it lists the first twelve occurrences of each rule and says how many it left
+out. `--report --all` lists every one, which is what you want when the file is going to
+somebody as a deliverable rather than being skimmed.
+
 It states what the tool cannot check *before* the findings rather than after. A report
 that lets a passing automated scan imply conformance is the thing the FTC fined an
 overlay vendor for, and burying the caveat at the bottom is how that happens.

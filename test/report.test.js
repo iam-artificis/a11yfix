@@ -156,6 +156,37 @@ test('info findings are excluded unless asked for', () => {
   assert.ok(!plain.includes('<span class="tag info">'), 'no info findings in the default report');
 });
 
+test('long runs of one finding are capped, and --all lifts the cap', () => {
+  // Twenty of the same missing alt. Capped, the report has to say how many it left out;
+  // uncapped, it has to list all of them, because somebody handed this as a deliverable
+  // needs every occurrence rather than a sample.
+  const rows = Array.from({ length: 20 }, (_, i) => `  <img src="img-${i}.png">`).join('\n');
+  const source = `<!doctype html>
+<html lang="en"><head><title>Gallery</title></head><body><main><h1>Gallery</h1>
+${rows}
+</main></body></html>`;
+
+  const summary = summaryFor('gallery.html', source);
+  const capped = renderReport(summary, OPTIONS);
+  const full = renderReport(summary, { ...OPTIONS, includeInfo: true });
+
+  const count = (html, needle) => html.split(needle).length - 1;
+
+  assert.equal(count(capped, '<div class="instance">'), 12 + countNonImg(summary));
+  assert.ok(capped.includes('8 further occurrences are not listed here'));
+  assert.ok(capped.includes('--all'), 'the report must say how to see the rest');
+
+  assert.ok(!full.includes('not listed here'), '--all must not truncate');
+  assert.ok(full.includes('img-19.png'), 'the last occurrence should be listed');
+});
+
+/** Instances the gallery fixture produces outside the capped rule. */
+function countNonImg(summary) {
+  return summary.files[0].violations.filter(
+    (v) => v.severity !== 'info' && v.ruleId !== 'A11Y-IMG-001',
+  ).length;
+}
+
 test('every criterion a rule claims exists in the WCAG table', () => {
   // A rule citing a criterion the table does not know about would render as a bare number
   // with a link to the standard's front page — the kind of small wrongness a client

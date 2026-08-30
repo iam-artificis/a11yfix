@@ -34,7 +34,11 @@ export interface ReportOptions {
   readonly generatedAt: string;
   readonly level: 'A' | 'AA' | 'AAA';
   readonly toolVersion: string;
-  /** Include info-severity findings. Off by default, as in the terminal. */
+  /**
+   * Include info-severity findings, and list every occurrence of a rule rather than the
+   * first twelve. Off by default, as in the terminal: --all means "show me everything"
+   * in both places.
+   */
   readonly includeInfo?: boolean;
   /** Command that produced this, printed so the reader can reproduce it. */
   readonly command?: string;
@@ -333,10 +337,11 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     );
   }
 
-  // Instances per rule are capped. A report with four hundred copies of the same finding
-  // is not more convincing than one with ten and an honest count of the rest; it is just
-  // one nobody reads to the end of.
-  const MAX_INSTANCES = 12;
+  // Instances per rule are capped by default. Four hundred copies of one finding is not
+  // more convincing than twelve and an honest count of the rest; it is just a report
+  // nobody reads to the end of. --all lifts the cap, because somebody being handed this
+  // as a deliverable needs every occurrence, not a sample.
+  const MAX_INSTANCES = includeInfo ? Number.POSITIVE_INFINITY : 12;
 
   for (const g of groups) {
     w(`<section class="rule ${g.severity}">`);
@@ -368,10 +373,10 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
       w('</div>');
     }
     if (g.violations.length > MAX_INSTANCES) {
+      const rest = g.violations.length - MAX_INSTANCES;
       w(
-        `<p class="more">${g.violations.length - MAX_INSTANCES} further ` +
-          `${g.violations.length - MAX_INSTANCES === 1 ? 'occurrence is' : 'occurrences are'} ` +
-          'not listed here. The full set is in the JSON output.</p>',
+        `<p class="more">${rest} further ${rest === 1 ? 'occurrence is' : 'occurrences are'} ` +
+          'not listed here. Run with <code>--all</code> for a report that lists every one.</p>',
       );
     }
     w('</section>');
