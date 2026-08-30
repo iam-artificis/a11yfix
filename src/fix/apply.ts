@@ -167,13 +167,18 @@ export function unifiedDiff(
   // together to share surrounding context.
   const changed: number[] = [];
   for (let i = 0; i < ops.length; i++) if ((ops[i] as Op).kind !== ' ') changed.push(i);
-  // A file whose only change is gaining or losing its trailing newline has no changed
-  // lines at all, but it did change. Anchoring a group on the last line makes the
-  // delete/add pair below fire, which is exactly how git represents it.
-  if (changed.length === 0) {
-    if (a.hasFinalNewline === b.hasFinalNewline || ops.length === 0) return '';
+
+  // Gaining or losing the trailing newline is a change to the last line even when that
+  // line is otherwise untouched, so it has to be anchored into a hunk. Without this the
+  // last line falls outside the context window of a change earlier in the file, no
+  // marker is emitted, and the patch applies cleanly while leaving the newline state
+  // exactly as it was.
+  const newlineChanged = a.hasFinalNewline !== b.hasFinalNewline;
+  if (ops.length === 0) return '';
+  if (newlineChanged && changed[changed.length - 1] !== ops.length - 1) {
     changed.push(ops.length - 1);
   }
+  if (changed.length === 0) return '';
 
   const groups: { from: number; to: number }[] = [];
   let from = changed[0] as number;
@@ -227,19 +232,21 @@ export function unifiedDiff(
     );
     for (let i = start; i < end; i++) {
       const op = ops[i] as Op;
+      const endsA = i === lastA && op.kind !== '+' && !a.hasFinalNewline;
+      const endsB = i === lastB && op.kind !== '-' && !b.hasFinalNewline;
       // A shared context line cannot carry two different newline states. When the two
       // sides disagree, git itself rewrites it as a delete/add pair, and a patch that
-      // does not do the same is rejected by `git apply`.
-      if (op.kind === ' ' && i === lastA && i === lastB && a.hasFinalNewline !== b.hasFinalNewline) {
+      // does not do the same is rejected by `git apply` or, worse, accepted and applied
+      // wrongly — the marker after a context line claims that line ends the file on both
+      // sides, so the lines after it get concatenated onto it.
+      if (op.kind === ' ' && endsA !== endsB) {
         out.push('-' + op.text);
-        if (!a.hasFinalNewline) out.push(NO_NEWLINE);
+        if (endsA) out.push(NO_NEWLINE);
         out.push('+' + op.text);
-        if (!b.hasFinalNewline) out.push(NO_NEWLINE);
+        if (endsB) out.push(NO_NEWLINE);
         continue;
       }
       out.push(op.kind + op.text);
-      const endsA = i === lastA && op.kind !== '+' && !a.hasFinalNewline;
-      const endsB = i === lastB && op.kind !== '-' && !b.hasFinalNewline;
       if (endsA || endsB) out.push(NO_NEWLINE);
     }
   }
@@ -257,6 +264,10 @@ const NO_NEWLINE = '\\ No newline at end of file';
  */
 function splitLines(text: string): { lines: string[]; hasFinalNewline: boolean } {
   const hasFinalNewline = text.endsWith('\n');
+  // An empty file has no lines. `"".split("\n")` gives [""], which reads as one empty
+  // line, and a diff built on that deletes a line that is not there — git rejects the
+  // patch. `"\n"` is different: that really is one empty line, terminated.
+  if (text === '') return { lines: [], hasFinalNewline: false };
   const lines = text.split('\n');
   if (hasFinalNewline) lines.pop();
   return { lines, hasFinalNewline };

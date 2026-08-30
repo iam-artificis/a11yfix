@@ -91,6 +91,95 @@ function roundTrip(name, source) {
   assert.equal(actual, expected, `${name}: patch applied but produced different bytes`);
 }
 
+/**
+ * Round-trip an arbitrary pair of texts, not just a realistic edit.
+ *
+ * The hand-written cases below cover the shapes somebody thought of. This covers the
+ * ones nobody did. The defect it exists for: the "\\ No newline at end of file" marker
+ * was emitted after any op at the last index of its side, including a context line with
+ * insertions after it — which tells git the file ends there on *both* sides. git then
+ * either rejected the patch or, worse, accepted it and concatenated the following lines
+ * onto the context line. Neither side ending in a newline was enough to trigger it;
+ * 24% of random single edits of that shape came out wrong.
+ */
+function roundTripPair(name, before, after) {
+  const diff = unifiedDiff('t.html', before, after);
+  if (diff === '') {
+    assert.equal(before, after, `${name}: empty diff for two different texts`);
+    return;
+  }
+
+  // No staging and no commit: `git apply` reads the working tree, and committing every
+  // case turned a two-second fuzz into eighty.
+  const worktree = join(repo, 'case');
+  rmSync(worktree, { recursive: true, force: true });
+  mkdirSync(worktree, { recursive: true });
+  writeFileSync(join(worktree, 't.html'), before);
+  writeFileSync(join(repo, 'patch.diff'), diff);
+
+  try {
+    git('apply', '--directory=case', 'patch.diff');
+  } catch (err) {
+    const detail = String(err.stderr ?? err.message).trim();
+    assert.fail(`${name}: git apply rejected the patch\n${detail}\n--- diff ---\n${diff}`);
+  }
+
+  const actual = readFileSync(join(worktree, 't.html'), 'utf8');
+  assert.equal(actual, after, `${name}: patch applied but produced different bytes`);
+}
+
+test('random edits round-trip through git apply, with and without final newlines', () => {
+  // A fixed seed: every run exercises the same 240 cases, so a failure is reproducible
+  // from the case number alone rather than being a story about a flaky test.
+  let seed = 20260831;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
+
+  const words = ['a', 'b', 'c', 'alpha', 'beta', '<p>x</p>', '  indented', ''];
+
+  for (let n = 0; n < 240; n++) {
+    const lineCount = 1 + Math.floor(rnd() * 6);
+    const lines = Array.from({ length: lineCount }, () => pick(words));
+
+    // Mutate: replace, insert or delete one line.
+    const edited = [...lines];
+    const at = Math.floor(rnd() * edited.length);
+    const kind = Math.floor(rnd() * 3);
+    if (kind === 0) edited[at] = pick(words) + 'MOD';
+    else if (kind === 1) edited.splice(at, 0, pick(words) + 'NEW');
+    else edited.splice(at, 1);
+    if (edited.length === 0) edited.push('only');
+
+    // The interesting axis: whether each side ends in a newline. All four combinations.
+    for (const [endBefore, endAfter] of [[false, false], [false, true], [true, false], [true, true]]) {
+      const before = lines.join('\n') + (endBefore ? '\n' : '');
+      const after = edited.join('\n') + (endAfter ? '\n' : '');
+      if (before === after) continue;
+      roundTripPair(`case ${n} (${endBefore ? 'LF' : 'no-LF'} -> ${endAfter ? 'LF' : 'no-LF'})`, before, after);
+    }
+  }
+});
+
+test('a surviving last line with insertions after it is not marked as final', () => {
+  // The exact shape the marker used to get wrong, kept as a named case so a regression
+  // reads as one rather than as "fuzz case 137 failed".
+  const diff = unifiedDiff('f.txt', 'c', 'c\nbMOD');
+  const lines = diff.split('\n');
+  const marker = '\\ No newline at end of file';
+  const contextC = lines.indexOf(' c');
+  assert.equal(contextC, -1, 'a line whose newline state differs must be rewritten, not kept as context');
+  assert.equal(lines.filter((l) => l === marker).length, 2, 'both sides end without a newline');
+  roundTripPair('surviving last line', 'c', 'c\nbMOD');
+});
+
+test('removing trailing lines produces a patch git accepts', () => {
+  roundTripPair('trailing lines removed', 'a\nb\n', 'a');
+  roundTripPair('trailing lines removed, no final newline either side', 'a\nb', 'a');
+});
+
 const BODY = '<html>\n<body>\n  <img src="a.png">\n  <p style="color:#999">Hi</p>\n  <span>tail</span>\n</body>\n</html>';
 const crlf = (s) => s.replace(/\n/g, '\r\n');
 
