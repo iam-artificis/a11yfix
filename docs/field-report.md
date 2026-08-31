@@ -193,26 +193,45 @@ near-clean result.
 
 | Site | Errors | Warnings | Info | Overlay | Total |
 |---|---|---|---|---|---|
-| `shm.ru` | 158 | 2 | 204 | 4 | 364 |
-| `spbu.ru` | 178 | 1 | 75 | 2 | 254 |
-| `rsl.ru` | 129 | 5 | 80 | — | 214 |
-| `obrnadzor.gov.ru` | 77 | 12 | 109 | — | 198 |
-| `nlr.ru` | 34 | 4 | 82 | 2 | 120 |
-| `tretyakovgallery.ru` | 40 | 1 | 68 | — | 109 |
-| `rusmuseum.ru` | 10 | 5 | 27 | — | 42 |
-| `libnn.ru` | 24 | 7 | 11 | — | 42 |
+| `shm.ru` | 118 | 2 | 204 | 4 | 324 |
+| `spbu.ru` | 176 | 2 | 75 | 2 | 253 |
+| `obrnadzor.gov.ru` | 75 | 12 | 109 | — | 196 |
+| `rsl.ru` | 105 | 5 | 80 | — | 190 |
+| `nlr.ru` | 18 | 5 | 82 | 2 | 105 |
+| `tretyakovgallery.ru` | 27 | 1 | 68 | — | 96 |
+| `rusmuseum.ru` | 8 | 5 | 27 | — | 40 |
+| `libnn.ru` | 16 | 7 | 11 | — | 34 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1345 total with the same suspicion the cal.com row deserves. 243 findings are
+Read the 1240 total with the same suspicion the cal.com row deserves. 243 findings are
 `target="_blank"` without `rel="noopener"` and 230 are a new window opened without
 warning — conventions, and on this evidence near-universal ones. Both are reported as
-information rather than as faults, for exactly that reason. Strip them and 872 remain, of
+information rather than as faults, for exactly that reason. Strip them and 767 remain, of
 which the load-bearing part is:
 
 - **238 pieces of text** below the contrast their size requires;
-- **172 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (122);
+- **132 pairs of links** sharing one name and going to different places;
 - **134 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
+- **65 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (15);
 - **36 elements** carrying `role="img"` with no accessible name.
+
+### The measurement corrected itself, downward
+
+An earlier run of this table read 1345, and the difference is not the sites changing. The
+placeholder-alt rule tested for "contains no letters" with `[^A-Za-z]`, which is a claim
+that only the Latin alphabet contains words. `alt="Логотип Государственного
+исторического музея"` has no A-Z in it. So did every other careful Russian description on
+these nine sites, and the tool called all of them empty: 122 findings, of which 107 were
+invented. Greek, Hebrew, Arabic, Japanese and Chinese alt text would have fared the same.
+
+It is worth being precise about how bad that was. It was not a missed problem, which this
+tool accepts by design. It was the opposite failure, in the one language the tool is being
+pointed at, on the rule with the second-highest count — and every one of those findings
+read as a confident, specific accusation with a line number next to it. Nothing in 227
+tests or five Western repositories could have caught it, because none of them contains a
+word that is not Latin.
+
+The nine sites did, immediately, and only because the corpus resembles the client.
 
 ### The finding the whole rule set is built around
 
@@ -225,9 +244,9 @@ On all three, the barriers the switch cannot touch are present anyway:
 
 | Site | Images with no alt | Placeholder alt | Links with no text |
 |---|---|---|---|
-| `shm.ru` | 30 | 40 | 14 |
-| `nlr.ru` | 8 | 21 | — |
-| `spbu.ru` | 1 | 2 | 69 |
+| `shm.ru` | 30 | — | 14 |
+| `nlr.ru` | 8 | 5 | — |
+| `spbu.ru` | 1 | — | 69 |
 
 This is the argument, measured rather than asserted: the switch changes the size and the
 colour of the page for a reader with some sight left, and leaves a reader with none
@@ -262,28 +281,30 @@ three hundred and ten it lists, taken at an even stride across the list:
 npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
 ```
 
-**5774 findings across 48 pages** — 3080 errors, 62 warnings, 2632 info — in
-twenty-six seconds, including the fetching. Five rules account for 4018 of them:
+**5133 findings across 48 pages** — 2438 errors, 63 warnings, 2632 info — in
+twenty-six seconds, including the fetching. Five rules account for 3890 of them:
 1362 links opening a new window with no `rel`, 782 links with no discernible text,
-649 placeholder `alt`s, 617 unannounced new windows, 608 images with no `alt` at all.
-Sixteen other rules divide the remaining 1756 between them.
+617 unannounced new windows, 608 images with no `alt` at all, 521 buttons with no
+accessible name. Sixteen other rules divide the remaining 1243 between them.
 
 Two of those five are conventions rather than barriers and are reported as information,
-which is what makes the report's own headline 3142 rather than 5774. That distinction was
+which is what makes the report's own headline 2501 rather than 5133. That distinction was
 made here, on this measurement: `rel="noopener"` was a warning until 1362 of a museum's
 findings turned out to be it — a quarter of an accessibility audit spent on a token with
 no WCAG criterion behind it, which every browser has implied by default since early 2021.
+This run also cost 649 findings to the `[^A-Za-z]` bug described above; they were all
+this site's Russian alt text, and none of them was real.
 
 Two things about that number are worth stating plainly, because both cut against it.
 
 Most of it is one template repeated. The per-page table in the report makes this
-unmissable. Below the front page — which is its own layout, and the worst at 364 — the
-next forty-six run between 103 and 133 findings each, across excursions, exhibitions,
-education and the research department: a spread of thirty on pages that have nothing in
-common but their template. That is not forty-eight problems. It is a handful of problems
-in a shared header, footer and card, multiplied by forty-eight. The honest way to sell
-against this number is that the fix is far smaller than the count, not that the site is
-forty-eight times as broken as one page suggested.
+unmissable. Below the front page — its own layout, and the worst at 324 — forty-six of the
+remaining forty-seven run between 98 and 128 findings each, across excursions,
+exhibitions, education and the research department: a spread of thirty on pages that have
+nothing in common but their template. That is not forty-eight problems. It is a handful of
+problems in a shared header, footer and card, multiplied by forty-eight. The honest way to
+sell against this number is that the fix is far smaller than the count, not that the site
+is forty-eight times as broken as one page suggested.
 
 The forty-eighth row is worth reading too: `/issledovatelyam/premii-zabelina/s.html`,
 16 findings, an order of magnitude below every other page. It is a stub, and the table is

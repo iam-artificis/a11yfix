@@ -529,3 +529,97 @@ test('a JSX comment works as a suppression too', () => {
   assert.equal(found.length, 1);
   assert.equal(found[0].line, 5);
 });
+
+
+/**
+ * Words exist outside the Latin alphabet.
+ *
+ * The placeholder-alt rule asked whether an alt contained letters with `[^A-Za-z]`, so
+ * `alt="Логотип Государственного исторического музея"` — a careful, correct description —
+ * was reported as carrying no information. On nine live Russian sites that rule fired 122
+ * times and 107 of those were invented; on one museum's forty-eight pages it was 649
+ * findings and all of them. Nothing in the test suite or in five Western repositories
+ * could have caught it, because none of them contains a word that is not Latin.
+ *
+ * This is the worst kind of failure this tool can have. Not a missed problem, which it
+ * accepts by design — a confident, specific accusation with a line number next to it, in
+ * the one language it is being pointed at.
+ */
+
+const altFindings = (source) =>
+  run('page.html', source).violations.filter((v) => v.ruleId === 'A11Y-IMG-002');
+
+const withImage = (attrs, lang = 'ru') =>
+  `<!doctype html><html lang="${lang}"><head><title>т</title></head><body><main><h1>З</h1>` +
+  `<img src="a.png" ${attrs}></main></body></html>`;
+
+test('alt text in a language without Latin letters is text', () => {
+  for (const alt of [
+    'Логотип Государственного исторического музея',
+    'Вид на Красную площадь зимой',
+    'Ελληνικά γράμματα',
+    'ירושלים',
+    'القدس',
+    '東京タワー',
+    '东京塔',
+    'თბილისი',
+  ]) {
+    assert.deepEqual(
+      altFindings(withImage(`alt="${alt}"`)).map((v) => v.message),
+      [],
+      `"${alt}" was reported as carrying no words`,
+    );
+  }
+});
+
+test('an alt with no letters in any script is still caught', () => {
+  // The rule the fix must not throw away: dimensions, indexes and decoration.
+  for (const alt of ['12 34', '— — —', '***', '  ·  ', '1920 1080']) {
+    const found = altFindings(withImage(`alt="${alt}"`));
+    assert.equal(found.length, 1, `"${alt}" should still be a finding`);
+  }
+});
+
+test('Russian placeholder alts are recognised as placeholders', () => {
+  // «Логотип» alone names the medium and stops, exactly as «logo» does — and the Russian
+  // web is where this tool is pointed, so the list has to speak it.
+  for (const alt of ['Логотип', 'изображение', 'ФОТО', 'картинка', 'баннер', 'без названия']) {
+    const found = altFindings(withImage(`alt="${alt}"`));
+    assert.equal(found.length, 1, `"${alt}" should be caught as a placeholder`);
+    assert.match(found[0].message, /generic placeholder/);
+  }
+});
+
+test('generic Russian link text is caught, and only on a Russian page', () => {
+  const page = (lang, body) =>
+    `<!doctype html><html lang="${lang}"><head><title>т</title></head><body><main><h1>З</h1>` +
+    `${body}</main></body></html>`;
+  const generic = (html, lang) =>
+    run('page.html', page(lang, html)).violations.filter((v) => v.ruleId === 'A11Y-LINK-002');
+
+  // «Подробнее» under every news card is the «read more» of the Russian web: a
+  // screen-reader user listing the links hears it forty times with nothing to tell
+  // them apart.
+  assert.equal(generic('<a href="/a">Подробнее</a>', 'ru').length, 1);
+  assert.equal(generic('<a href="/a">Читать далее</a>', 'ru').length, 1);
+  assert.equal(generic('<a href="/a">Скачать</a>', 'ru').length, 1);
+
+  // A link that says where it goes is left alone, which is the whole point.
+  assert.deepEqual(generic('<a href="/a">Выставка «Русская зима»</a>', 'ru'), []);
+  assert.deepEqual(generic('<a href="/a">Программа конференции 2026</a>', 'ru'), []);
+
+  // And the list is scoped by the document's language, like every other language here.
+  assert.deepEqual(generic('<a href="/a">Подробнее</a>', 'en'), []);
+});
+
+test('a Russian new-window warning in the link name suppresses the new-window finding', () => {
+  const html =
+    '<!doctype html><html lang="ru"><head><title>т</title></head><body><main><h1>З</h1>' +
+    '<a href="/p.pdf" target="_blank" rel="noopener">Программа (откроется в новой вкладке)</a>' +
+    '</main></body></html>';
+  assert.deepEqual(
+    run('page.html', html).violations.filter((v) => v.ruleId === 'A11Y-LINK-005'),
+    [],
+    'the link already says what it does; saying it again is not an improvement',
+  );
+});

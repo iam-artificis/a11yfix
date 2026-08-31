@@ -263,6 +263,20 @@ const GENERIC_LINK_TEXT: Readonly<Record<string, readonly string[]>> = {
     'klik hier', 'hier', 'lees meer', 'meer', 'meer informatie', 'meer info',
     'downloaden', 'download', 'verder', 'deze link', 'link',
   ],
+  // Only ever consulted on a page that declares lang="ru", like every other list here.
+  // «Подробнее» is the «read more» of the Russian web and sits under most news cards on
+  // most institutional sites; a screen-reader user listing the links then hears it forty
+  // times with nothing to tell them apart.
+  //
+  // normalizeText decomposes and strips combining marks, so «ё» arrives as «е»: the
+  // spellings written here are the post-normalisation ones, and «ещё» would never match.
+  ru: [
+    'подробнее', 'подробно', 'подробная информация', 'читать далее', 'читать дальше',
+    'читать', 'читать полностью', 'далее', 'дальше', 'здесь', 'тут', 'сюда',
+    'нажмите здесь', 'нажмите сюда', 'кликните здесь', 'ссылка', 'эта ссылка',
+    'по ссылке', 'перейти', 'открыть', 'смотреть', 'посмотреть', 'скачать',
+    'загрузить', 'узнать больше', 'больше', 'еще', 'продолжение', 'ознакомиться',
+  ],
 };
 
 /** Phrases that already warn a user that the link leaves the current window. */
@@ -274,6 +288,7 @@ const NEW_WINDOW_HINTS: readonly string[] = [
   'nova janela', 'nova aba', 'abre em', 'link externo',
   'nuova finestra', 'nuova scheda', 'si apre in', 'link esterno',
   'nieuw venster', 'nieuw tabblad', 'opent in', 'externe link',
+  'новом окне', 'новой вкладке', 'откроется в', 'внешняя ссылка', 'внешний сайт',
 ];
 
 /** Text that is nothing but a web address. `[^\s]+` is linear — no backtracking risk. */

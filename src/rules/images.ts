@@ -324,8 +324,19 @@ const BARE_EXTENSION = new RegExp('^\\.?(?:' + IMAGE_EXT + ')$', 'i');
 /** Camera, screenshot and upload file names: DSC_0001, IMG-1234, screenshot 5. */
 const CAMERA_NAME = /^(?:dsc[nf]?|img|image|photo|pic|scan|screenshot|screen[-_ ]shot|untitled|download|unnamed|capture|pxl|gopr|mvimg|snap)[-_ ]?\d{1,12}$/i;
 
-/** No letters at all — dimensions, indexes, decorative punctuation. */
-const NO_WORDS = /^[^A-Za-z]+$/;
+/**
+ * No letters at all, in any script — dimensions, indexes, decorative punctuation.
+ *
+ * This was `[^A-Za-z]`, which is a statement that only the Latin alphabet contains
+ * words. `alt="Логотип Государственного исторического музея"` has no A-Z in it, so a
+ * correct, careful Russian description was reported as carrying no information — and so
+ * was every Greek, Georgian, Hebrew, Arabic, Japanese and Chinese one. On the museum site
+ * this tool is aimed at, that rule fired 649 times.
+ *
+ * The Unicode letter class covers every script, including the ideographs that make up a
+ * Chinese alt with no spaces in it at all.
+ */
+const NO_WORDS = /^\P{L}+$/u;
 
 const PLACEHOLDER_ALT = new Set([
   'image', 'images', 'img', 'photo', 'photos', 'photograph', 'picture', 'pictures',
@@ -336,6 +347,14 @@ const PLACEHOLDER_ALT = new Set([
   'na', 'todo', 'tbd', 'test', 'temp', 'dummy', 'asdf', 'figure', 'chart', 'graph',
   'diagram', 'screenshot', 'avatar', 'profile picture', 'media', 'file', 'asset',
   'product image', 'hero image', 'background', 'bg', 'decorative',
+  // Russian, because that is the market this tool was pointed at and «Логотип» as the
+  // whole of an alt names the medium and stops, exactly as «logo» does. Unlike the link
+  // phrases these are not scoped by lang: none of them collides with an English word, and
+  // an alt is often the one string on a page nobody set a language for.
+  'логотип', 'логотип сайта', 'изображение', 'картинка', 'фото', 'фотография',
+  'баннер', 'иконка', 'значок', 'рисунок', 'схема', 'график', 'диаграмма',
+  'без названия', 'нет описания', 'нет данных', 'заглушка', 'аватар', 'миниатюра',
+  'превью', 'обложка', 'фон', 'разделитель', 'пустое изображение',
   // A truncated "image of" names the medium and then stops. A11Y-IMG-003 deliberately
   // leaves these alone — stripping the prefix would leave an empty alt, which is a claim
   // that the image is decorative — so they are caught here as placeholders instead.
