@@ -20,7 +20,18 @@ function importSection(source: string): string {
   return source.slice(0, 8192);
 }
 
-const IMPORT_RE = /import\s+([\s\S]*?)\s+from\s*['"]([^'"]+)['"]/g;
+/**
+ * The clause is `[^'"]*?` rather than `[\s\S]*?`, and `from` is anchored on a word
+ * boundary rather than on `\s+`.
+ *
+ * Two lazy runs next to each other — `\s+([\s\S]*?)\s+` — are the classic quadratic
+ * shape: every failure re-tries every split of the whitespace between them. 1600 spaces
+ * after the word `import` took 584ms, and the 8 KB window this runs in puts the worst
+ * case near fifteen seconds for a single file. An import clause cannot contain a quote,
+ * so refusing to cross one bounds the search — and rules out a match that runs from an
+ * `import` inside a comment to some later module string.
+ */
+const IMPORT_RE = /\bimport\s([^'"]*?)\bfrom\s*['"]([^'"]+)['"]/g;
 
 /**
  * The module a JSX tag's binding was imported from, or undefined if it is not an import

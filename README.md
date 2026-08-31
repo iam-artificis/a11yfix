@@ -36,7 +36,7 @@ change it to, and checks the change did not break the design.
 That translation step is most of the work, and no tool does it.
 
 A11yFix reads your **source**, keeps byte-exact offsets for every tag and attribute, and
-emits a patch. It scans 3,300 files in 1.6 seconds, needs no browser, no
+emits a patch. It scans 3,300 files in 1.3 seconds, needs no browser, no
 network, no API key, and no runtime dependencies at all.
 
 ## What it actually fixes

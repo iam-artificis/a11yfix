@@ -372,21 +372,44 @@ function parseAttributes(src: string, from: number, window: number): { attrs: At
   return { attrs, end: i };
 }
 
+/**
+ * The result of looking for a close tag.
+ *
+ * `sawClose` is the part that matters for speed: when the scan reached the end of the
+ * file without meeting a single `</tag`, no later element of that name will find one
+ * either, so the caller can stop asking. Without that, a list of a few thousand `<li>`
+ * written without closing tags — which is legal HTML and common in generated pages —
+ * made every item scan to the end of the document looking for a `</li>` that is not
+ * there. 4000 items took 425ms in the tokeniser alone.
+ *
+ * It has to be `sawClose` rather than "this position failed", because a same-name tag
+ * nested inside raises the depth: in `<p><p></p>` the outer `<p>` finds no close and the
+ * inner one does, so a failure at an earlier offset says nothing about a later one.
+ */
+interface CloseSearch {
+  readonly found: { contentEnd: number; end: number } | null;
+  readonly sawClose: boolean;
+}
+
 /** Find the matching close tag for `tag` starting at `from`, honouring nesting. */
-function findCloseTag(src: string, tag: string, from: number): { contentEnd: number; end: number } | null {
+function findCloseTag(src: string, tag: string, from: number): CloseSearch {
   const lower = tag.toLowerCase();
   let depth = 1;
+  let sawClose = false;
   let i = from;
   while (i < src.length) {
     const lt = src.indexOf('<', i);
-    if (lt < 0) return null;
+    if (lt < 0) return { found: null, sawClose };
     if (src[lt + 1] === '/') {
       let k = lt + 2;
       while (k < src.length && NAME_CHAR.test(src[k] as string)) k++;
       if (src.slice(lt + 2, k).toLowerCase() === lower) {
+        sawClose = true;
         depth--;
         const gt = src.indexOf('>', k);
-        if (depth === 0) return { contentEnd: lt, end: gt < 0 ? src.length : gt + 1 };
+        if (depth === 0) {
+          return { found: { contentEnd: lt, end: gt < 0 ? src.length : gt + 1 }, sawClose };
+        }
         i = gt < 0 ? src.length : gt + 1;
         continue;
       }
@@ -406,7 +429,7 @@ function findCloseTag(src: string, tag: string, from: number): { contentEnd: num
     }
     i = lt + 1;
   }
-  return null;
+  return { found: null, sawClose };
 }
 
 /** Parse markup, preserving every source offset. Never throws on malformed input. */
@@ -429,6 +452,8 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
   const roots: Element[] = [];
   const stack: Element[] = [];
   const masked = options.skipTemplateLiterals === true ? templateLiteralRanges(source) : [];
+  // Tag names with no closing tag left in the document. See CloseSearch.
+  const unclosedTags = new Set<string>();
   let i = 0;
 
   while (i < source.length) {
@@ -514,7 +539,7 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
       if (RAW_TEXT_ELEMENTS.has(tagLower)) {
         // Raw-text content must not be scanned for tags, or a '<' inside a script
         // string would open a phantom element.
-        const closeIdx = source.toLowerCase().indexOf(`</${tagLower}`, openEnd);
+        const closeIdx = indexOfCloseTag(source, tagLower, openEnd);
         if (closeIdx >= 0) {
           innerSource = source.slice(openEnd, closeIdx);
           const gt = source.indexOf('>', closeIdx);
@@ -523,11 +548,15 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
           end = source.length;
           innerSource = source.slice(openEnd);
         }
-      } else {
+      } else if (!unclosedTags.has(tagLower)) {
         const close = findCloseTag(source, tagLower, openEnd);
-        if (close !== null) {
-          innerSource = source.slice(openEnd, close.contentEnd);
-          end = close.end;
+        if (close.found !== null) {
+          innerSource = source.slice(openEnd, close.found.contentEnd);
+          end = close.found.end;
+        } else if (!close.sawClose) {
+          // There is no </tag anywhere ahead, so no later element of this name needs to
+          // go looking for one.
+          unclosedTags.add(tagLower);
         }
       }
     }
@@ -589,16 +618,42 @@ export function textOf(el: Element): string {
 }
 
 /** 1-indexed line and column for an offset. */
-export function positionAt(source: string, offset: number): { line: number; column: number } {
-  let line = 1;
-  let last = 0;
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source.charCodeAt(i) === 10) {
-      line++;
-      last = i + 1;
-    }
+/**
+ * Line starts for the file being scanned, remembered between calls.
+ *
+ * One entry, because a scan works through one file at a time and the next file evicts
+ * the last. The memo is pure — same source, same answer — so it changes speed and
+ * nothing else; and it is bounded, holding one file's worth of offsets rather than
+ * accumulating an index per file scanned.
+ *
+ * Without it every violation counted newlines from byte 0 again. A file reporting 1600
+ * findings walked its own bytes 1600 times, which is quadratic in exactly the case a
+ * first run on a neglected codebase produces.
+ */
+let lineIndexSource: string | null = null;
+let lineIndexStarts: readonly number[] = [0];
+
+function lineStarts(source: string): readonly number[] {
+  if (source === lineIndexSource) return lineIndexStarts;
+  const starts: number[] = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) starts.push(i + 1);
   }
-  return { line, column: offset - last + 1 };
+  lineIndexSource = source;
+  lineIndexStarts = starts;
+  return starts;
+}
+
+export function positionAt(source: string, offset: number): { line: number; column: number } {
+  const starts = lineStarts(source);
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if ((starts[mid] as number) <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return { line: lo + 1, column: offset - (starts[lo] as number) + 1 };
 }
 
 /**
@@ -638,6 +693,27 @@ function templateLiteralRanges(source: string): (readonly [number, number])[] {
     i = end;
   }
   return ranges;
+}
+
+/**
+ * Where `</tag` next appears, matched without regard to case and without copying.
+ *
+ * `source.toLowerCase().indexOf(…)` allocated a second copy of the whole file for every
+ * <script>, <style>, <textarea>, <title> and <pre> in it. A page with a hundred of them
+ * lowercased a hundred copies of the file to find a hundred short strings.
+ */
+function indexOfCloseTag(source: string, tagLower: string, from: number): number {
+  let i = from;
+  while (i < source.length) {
+    const lt = source.indexOf('<', i);
+    if (lt < 0) return -1;
+    const nameEnd = lt + 2 + tagLower.length;
+    if (source[lt + 1] === '/' && source.slice(lt + 2, nameEnd).toLowerCase() === tagLower) {
+      return lt;
+    }
+    i = lt + 1;
+  }
+  return -1;
 }
 
 function countPrecedingBackslashes(source: string, at: number): number {

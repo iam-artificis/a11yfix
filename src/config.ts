@@ -134,7 +134,18 @@ function validate(value: unknown, path: string): Config {
  */
 export function matchesGlob(path: string, pattern: string): boolean {
   const p = path.split(sep).join('/').replace(/^\.\//, '');
-  let g = pattern.split(sep).join('/').replace(/^\.\//, '').replace(/\/+$/, '/**');
+  let g = pattern
+    .split(sep)
+    .join('/')
+    .replace(/^\.\//, '')
+    .replace(/\/+$/, '/**')
+    // `**/` means "zero or more directories", so a run of them means what one means.
+    // Compiled literally they became adjacent `(?:.*/)?` groups — the (a*)* shape —
+    // and eight of them took five seconds to fail on an ordinary path. Ignore patterns
+    // come out of a user's config file, so a plausible typo could hang a whole scan.
+    .replace(/(?:\*\*\/)+/g, '**/')
+    // Three or more stars is two stars with extra characters.
+    .replace(/\*{3,}/g, '**');
   // A bare name with no wildcard and no slash means "this directory or file, anywhere".
   if (!g.includes('/') && !g.includes('*') && !g.includes('?')) g = `**/${g}/**`;
 

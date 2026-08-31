@@ -12,10 +12,10 @@ Measured on 2026-08-31 with a11yfix 0.1.0.
 | Repository | Commit | Files | Errors | Warnings | Info | Time |
 |---|---|---|---|---|---|---|
 | `vercel/commerce` | `3761e52` | 45 | 4 | 1 | 1 | 0.08s |
-| `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 26 | 14 | 7 | 0.23s |
+| `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 26 | 14 | 7 | 0.21s |
 | `documenso/documenso` | `5082b47` | 674 | 52 | 14 | 3 | 0.38s |
-| `calcom/cal.com` | `176037d` | 989 | 827 | 542 | 12 | 0.77s |
-| `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 71 | 357 | 1.58s |
+| `calcom/cal.com` | `176037d` | 989 | 827 | 542 | 12 | 0.55s |
+| `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 71 | 357 | 1.32s |
 
 These are well-built projects by people who care. The point of the table is not that they
 are bad; it is that the numbers are small, which is what a precision-tuned tool should

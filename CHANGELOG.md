@@ -63,3 +63,22 @@ Also from that review, and from the corpus run that follows it:
   measures it agree to the last decimal.
 - Stylesheet rules are ranked by specificity, and `em`/`%` font sizes resolve up the
   ancestor chain or stay honestly unknown.
+
+Four quadratic loops and two exponential regexes, all reachable from ordinary input:
+
+- A list written without closing tags — legal HTML, and what most generators emit —
+  made every `<li>` scan to the end of the document for a `</li>` that is not there.
+- Every violation counted newlines from byte 0 again, so a file with many findings
+  walked its own bytes once per finding.
+- Contrast asked "is anything painted over me?" by comparing each element to all of its
+  siblings, once per element.
+- Every element was tested against every CSS rule, re-parsing each selector each time.
+- An ignore pattern of `**/**/…` compiled to nested `.*` groups: eight of them took five
+  seconds to *fail* on an ordinary path, and patterns come out of a user's config file.
+- `IMPORT_RE` put two lazy runs next to each other, so a long whitespace run after the
+  word `import` backtracked quadratically.
+
+`test/scale.test.js` covers each with a bound a hundredfold above the fixed timing, so it
+fails on a change in complexity and not on a slow machine. Findings on all five corpora
+are byte-identical; `shadcn-ui/ui` went from 1.58s to 1.32s and `calcom/cal.com` from
+0.77s to 0.55s.

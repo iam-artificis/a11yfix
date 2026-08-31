@@ -98,7 +98,11 @@ const DEFAULT_BACKGROUND = '#ffffff';
 
 export class Palette {
   private readonly styles = new Map<Element, ElementStyle>();
+  /** Per parent: the children that paint over their siblings. See coveredByOverlay. */
+  private readonly overlayCache = new Map<Element, Element[]>();
   private readonly cssRules: CssRule[] = [];
+  /** Selector key -> the rules carrying it, with their specificity and source position. */
+  private readonly ruleIndex = new Map<string, { rank: number; index: number }[]>();
   /**
    * Rules that came from a <style> block in the very file being analysed. Only these
    * carry offsets a fix can write to; a rule from an external stylesheet describes a
@@ -145,7 +149,31 @@ export class Palette {
         this.embeddedRules.add(this.cssRules[this.cssRules.length - 1] as CssRule);
       }
     }
+    this.buildRuleIndex();
     for (const el of markup.elements) this.styles.set(el, this.computeOwn(el));
+  }
+
+  /**
+   * Group the rules by what their selector has to match: `t:div`, `c:hint`, `i:alert`.
+   *
+   * Only the three simple selector shapes are attributable with certainty, so the full
+   * specificity triple collapses to one rank, recorded here alongside the rule's position
+   * in source order.
+   */
+  private buildRuleIndex(): void {
+    const SPECIFICITY = { tag: 0, class: 1, id: 2 } as const;
+    const PREFIX = { tag: 't:', class: 'c:', id: 'i:' } as const;
+    this.cssRules.forEach((rule, index) => {
+      for (const sel of rule.selectors) {
+        const simple = asSimpleSelector(sel);
+        if (simple === null) continue;
+        const key = PREFIX[simple.kind] + simple.name;
+        const bucket = this.ruleIndex.get(key);
+        const entry = { rank: SPECIFICITY[simple.kind], index };
+        if (bucket === undefined) this.ruleIndex.set(key, [entry]);
+        else bucket.push(entry);
+      }
+    });
   }
 
 
@@ -211,26 +239,33 @@ export class Palette {
     // Only the three simple selector shapes reach here, so the full specificity triple
     // collapses to one rank. Sort is stable, which leaves source order as the tie-break
     // between selectors of equal weight — which is what the cascade says.
-    const SPECIFICITY = { tag: 0, class: 1, id: 2 } as const;
-    const matched: { rank: number; rule: CssRule }[] = [];
-    for (const rule of this.cssRules) {
-      let rank = -1;
-      for (const sel of rule.selectors) {
-        const simple = asSimpleSelector(sel);
-        if (simple === null) continue;
-        const hit =
-          simple.kind === 'class'
-            ? classes.includes(simple.name)
-            : simple.kind === 'id'
-              ? idAttr?.value === simple.name
-              : simple.name === el.tagLower;
+    //
+    // Looked up rather than scanned. Testing every rule against every element re-parsed
+    // each selector with a regex once per element: 800 rules over 800 elements is 640,000
+    // parses of the same eighty strings. The index is built once and keyed on the thing
+    // that has to match, so an element only meets rules that name its tag, its id or one
+    // of its classes.
+    const matched: { rank: number; index: number }[] = [];
+    const best = new Map<number, number>();
+    const collect = (key: string): void => {
+      const hits = this.ruleIndex.get(key);
+      if (hits === undefined) return;
+      for (const hit of hits) {
         // A rule may list several selectors; the one that matches most specifically wins.
-        if (hit) rank = Math.max(rank, SPECIFICITY[simple.kind]);
+        const prev = best.get(hit.index);
+        if (prev === undefined || hit.rank > prev) best.set(hit.index, hit.rank);
       }
-      if (rank >= 0) matched.push({ rank, rule });
-    }
-    matched.sort((a, b) => a.rank - b.rank);
-    for (const { rule } of matched) {
+    };
+    collect('t:' + el.tagLower);
+    if (idAttr?.value != null) collect('i:' + idAttr.value);
+    for (const c of classes) collect('c:' + c);
+    for (const [index, rank] of best) matched.push({ index, rank });
+
+    // Source order is the tie-break between selectors of equal weight, which is what the
+    // cascade says; with rules gathered from three buckets it has to be explicit.
+    matched.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index));
+    for (const { index } of matched) {
+      const rule = this.cssRules[index] as CssRule;
       this.absorb(out, rule.declarations, el, 'stylesheet', this.embeddedRules.has(rule) ? this.file : undefined);
     }
 
@@ -401,10 +436,17 @@ export class Palette {
   private coveredByOverlay(el: Element): boolean {
     const parent = el.parent;
     if (parent === null) return false;
-    for (const sibling of parent.children) {
-      if (sibling === el) continue;
-      if (!isStretchedOverlay(sibling)) continue;
-      if (paintsSomething(sibling)) return true;
+    // Which children of a parent are overlays is a property of the parent, so it is
+    // answered once. Asking it per element re-read every sibling for every sibling: a
+    // flat page of 2000 paragraphs — a changelog, a search-results list, a table of
+    // contents — spent most of its scan comparing each one to all the others.
+    let overlays = this.overlayCache.get(parent);
+    if (overlays === undefined) {
+      overlays = parent.children.filter((c) => isStretchedOverlay(c) && paintsSomething(c));
+      this.overlayCache.set(parent, overlays);
+    }
+    for (const overlay of overlays) {
+      if (overlay !== el) return true;
     }
     return false;
   }
