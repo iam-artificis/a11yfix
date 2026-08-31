@@ -292,3 +292,18 @@ test('the help documents the mode it now has', () => {
   assert.match(r.out, /a11yfix <url>/);
   assert.match(r.out, /SCANNING A LIVE PAGE/);
 });
+
+test('an oversized response is refused on the declared length, not after reading it', async () => {
+  await withServer(
+    (req, res) => {
+      // Lies about the size in the only way that matters here: says it is enormous and
+      // then serves nothing. If the limit were only checked after reading, this would
+      // pass — which is exactly the case where reading first is expensive.
+      res.writeHead(200, { 'content-type': 'text/html', 'content-length': '900000000' });
+      res.end();
+    },
+    async (base) => {
+      await assert.rejects(() => fetchPage(base), /exceeds the .* limit/);
+    },
+  );
+});

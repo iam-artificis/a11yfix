@@ -77,12 +77,18 @@ async function get(url: string, limit: number): Promise<{ body: string; final: s
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`.trimEnd());
   }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > limit) {
-    throw new Error(
-      `${Math.round(buffer.byteLength / 1024)} KB exceeds the ${Math.round(limit / 1024)} KB limit`,
-    );
+  // Checked before reading, when the server says so, and again after: Content-Length is
+  // advisory and a chunked response has none, but when it is there it saves pulling a
+  // gigabyte into memory to then decide against it.
+  const declaredLength = Number(response.headers.get('content-length') ?? '');
+  const tooBig = (bytes: number): Error =>
+    new Error(`${Math.round(bytes / 1024)} KB exceeds the ${Math.round(limit / 1024)} KB limit`);
+  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+    await response.body?.cancel();
+    throw tooBig(declaredLength);
   }
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > limit) throw tooBig(buffer.byteLength);
   // Servers still send windows-1251 in this corner of the web, and a page decoded as the
   // wrong encoding is worse than one not read at all: every rule that looks at text sees
   // mojibake and reports on it.
