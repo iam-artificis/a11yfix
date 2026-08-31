@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMarkup, getAttr, hasAttr, textOf, positionAt } from '../dist/parse/markup.js';
+import { parseSelector } from '../dist/design/selector.js';
 import {
   parseCss,
   parseInlineStyle,
   lengthToPx,
   isBoldWeight,
-  asSimpleSelector,
 } from '../dist/parse/css.js';
 import {
   resolveTailwindColor,
@@ -212,16 +212,19 @@ test('inline style declarations keep their offsets', () => {
   );
 });
 
-test('only selectors we can attribute with certainty are accepted', () => {
-  assert.deepEqual(asSimpleSelector('.btn'), { kind: 'class', name: 'btn' });
-  assert.deepEqual(asSimpleSelector('#main'), { kind: 'id', name: 'main' });
-  assert.deepEqual(asSimpleSelector('p'), { kind: 'tag', name: 'p' });
-  // These depend on ancestry or state we are not evaluating. Guessing here produces a
-  // fix for a colour combination that may never render.
-  assert.equal(asSimpleSelector('.card .btn'), null);
-  assert.equal(asSimpleSelector('.btn:hover'), null);
-  assert.equal(asSimpleSelector('a[href^="http"]'), null);
-  assert.equal(asSimpleSelector('*'), null);
+test('only selectors whose effect can be decided are accepted', () => {
+  // Ancestry is a fact in the parsed markup, so `.card .btn` is decidable and accepted.
+  // State, attributes and sibling order are not, so the rest stay refused — and refused
+  // means the declaration is left out, never guessed at.
+  for (const ok of ['.btn', '#main', 'p', 'p.lead', '.card .btn', 'nav > a', '.a.b .c']) {
+    assert.notEqual(parseSelector(ok), null, `should be supported: ${ok}`);
+  }
+  for (const no of ['.btn:hover', 'a[href^="http"]', '*', '.a + .b', '.a ~ .b', 'p::before', '> p']) {
+    assert.equal(parseSelector(no), null, `should be refused: ${no}`);
+  }
+  // Specificity is the a-b-c triple, so an id beats any number of classes.
+  assert.ok(parseSelector('#main').specificity > parseSelector('.a.b.c').specificity);
+  assert.ok(parseSelector('.card .btn').specificity > parseSelector('.btn').specificity);
 });
 
 test('relative lengths return undefined rather than a guess', () => {

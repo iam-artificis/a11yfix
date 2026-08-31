@@ -20,6 +20,7 @@
  */
 
 import type { StylesheetSource } from './design/palette.js';
+import { gunzipSync } from 'node:zlib';
 import { parseMarkup } from './parse/markup.js';
 
 /** A page is not worth reading past this; a stylesheet even less so. */
@@ -68,7 +69,10 @@ function readable(err: unknown): string {
   return String(err);
 }
 
-async function get(url: string, limit: number): Promise<{ body: string; final: string }> {
+async function get(
+  url: string,
+  limit: number,
+): Promise<{ body: string; bytes: Uint8Array; final: string; type: string }> {
   const response = await fetch(url, {
     headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
     redirect: 'follow',
@@ -101,8 +105,16 @@ async function get(url: string, limit: number): Promise<{ body: string; final: s
       body = new TextDecoder(pickEncoding(meta), { fatal: false }).decode(buffer);
     }
   }
-  return { body, final: response.url === '' ? url : response.url };
+  return {
+    body,
+    bytes: new Uint8Array(buffer),
+    final: response.url === '' ? url : response.url,
+    type,
+  };
 }
+
+/** Content types worth handing to a markup parser. An absent type is not a refusal. */
+const HTMLISH = /^(?:text\/html|application\/xhtml)/i;
 
 /** A label TextDecoder accepts, defaulting to UTF-8 for anything unrecognised. */
 function pickEncoding(label: string | undefined): string {
@@ -156,6 +168,11 @@ export async function fetchPage(input: string): Promise<FetchedPage> {
     page = await get(url.href, MAX_HTML_BYTES);
   } catch (err) {
     throw new Error(`Could not read ${url.href}: ${readable(err)}`);
+  }
+  if (page.type !== '' && !HTMLISH.test(page.type)) {
+    // A sitemap happily lists PDFs and images alongside pages. Parsing one as markup
+    // produces findings about bytes that were never HTML, which is worse than skipping.
+    throw new Error(`${url.href} is ${page.type.split(';')[0] as string}, not an HTML page`);
   }
   const finalUrl = new URL(page.final);
   if (finalUrl.href !== url.href) notes.push(`redirected to ${finalUrl.href}`);
@@ -222,4 +239,132 @@ export async function fetchPage(input: string): Promise<FetchedPage> {
     sparse,
     notes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sitemaps
+// ---------------------------------------------------------------------------
+
+/**
+ * A sitemap index may name dozens of sitemaps. Reading them all to satisfy a scan of
+ * fifty pages would be work nobody asked for, on somebody else's server.
+ */
+const MAX_CHILD_SITEMAPS = 10;
+
+/** `<loc>` holds a URL and nothing else, so this needs no XML parser. */
+const LOC = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
+
+/**
+ * Sitemaps list documents, not only pages: nlr.ru's names PDFs among its articles.
+ * Dropped by extension before anything is requested, so a scan of fifty pages does not
+ * spend ten of them downloading files it cannot read.
+ */
+const NOT_A_PAGE =
+  /\.(?:pdf|docx?|xlsx?|pptx?|rtf|odt|ods|zip|rar|7z|gz|tar|csv|txt|jpe?g|png|gif|webp|avif|svg|ico|bmp|tiff?|mp3|mp4|avi|mov|wmv|webm|ogg|wav|woff2?|ttf|eot|apk|exe|dmg|xml|json)$/i;
+
+export interface SitemapResult {
+  readonly urls: readonly string[];
+  readonly notes: readonly string[];
+}
+
+function gunzipIfNeeded(bytes: Uint8Array, text: string): string {
+  // The gzip magic number. Servers serve sitemap.xml.gz with every content-type there
+  // is, so the bytes are more reliable than the header.
+  if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) return text;
+  return new TextDecoder('utf-8', { fatal: false }).decode(gunzipSync(bytes));
+}
+
+/**
+ * The pages a site lists for machines to read.
+ *
+ * This exists instead of a crawler. A crawler has to decide what counts as a page, how
+ * deep to go, and how hard to push somebody's server; a sitemap is the site's own answer
+ * to the first two and lets the third stay conservative. Institutional sites in this
+ * market — Bitrix, 1C, uCoz — publish one nearly without exception.
+ *
+ * Same-origin only, deduplicated, and capped by the caller. A sitemap index is followed
+ * one level down and no further.
+ */
+export async function fetchSitemap(input: string, limit: number): Promise<SitemapResult> {
+  let root: URL;
+  try {
+    root = new URL(input);
+  } catch {
+    throw new Error(`Not a URL: ${input}`);
+  }
+  if (root.protocol !== 'http:' && root.protocol !== 'https:') {
+    throw new Error(`Only http and https can be fetched, not ${root.protocol}`);
+  }
+
+  const notes: string[] = [];
+  const read = async (url: string): Promise<string> => {
+    const got = await get(url, MAX_HTML_BYTES);
+    return gunzipIfNeeded(got.bytes, got.body);
+  };
+
+  let xml: string;
+  try {
+    xml = await read(root.href);
+  } catch (err) {
+    throw new Error(`Could not read ${root.href}: ${readable(err)}`);
+  }
+
+  // `<loc>` is XML, so `?a=1&b=2` is written `?a=1&amp;b=2`. Fetching it verbatim asks
+  // the server for a query string that has "amp;" in the middle of it.
+  const unescapeXml = (s: string): string =>
+    s
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
+  const locs = (text: string): string[] =>
+    [...text.matchAll(LOC)].map((m) => unescapeXml(m[1] as string));
+  const isIndex = /<sitemapindex[\s>]/i.test(xml);
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  const take = (raw: string): void => {
+    if (urls.length >= limit) return;
+    let u: URL;
+    try {
+      u = new URL(raw, root);
+    } catch {
+      return;
+    }
+    if (u.origin !== root.origin) return;
+    if (NOT_A_PAGE.test(u.pathname)) return;
+    u.hash = '';
+    if (seen.has(u.href)) return;
+    seen.add(u.href);
+    urls.push(u.href);
+  };
+
+  if (isIndex) {
+    const children = locs(xml);
+    if (children.length > MAX_CHILD_SITEMAPS) {
+      notes.push(
+        `sitemap index lists ${children.length} sitemaps; read the first ${MAX_CHILD_SITEMAPS}`,
+      );
+    }
+    let failed = 0;
+    for (const child of children.slice(0, MAX_CHILD_SITEMAPS)) {
+      if (urls.length >= limit) break;
+      try {
+        for (const loc of locs(await read(new URL(child, root).href))) take(loc);
+      } catch {
+        failed++;
+      }
+    }
+    if (failed > 0) notes.push(`${failed} of the listed sitemaps could not be read`);
+  } else {
+    for (const loc of locs(xml)) take(loc);
+  }
+
+  if (urls.length === 0) {
+    throw new Error(
+      `${root.href} lists no pages. It may not be a sitemap, or every URL in it is on another host.`,
+    );
+  }
+  return { urls, notes };
 }

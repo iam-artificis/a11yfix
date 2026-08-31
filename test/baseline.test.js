@@ -15,7 +15,7 @@ import {
 
 /**
  * A baseline is the feature that decides whether a team can adopt this at all: a real
- * application produced 1381 findings on its first run, and nobody fixes 1381 things
+ * application produced 1382 findings on its first run, and nobody fixes 1382 things
  * before merging the next feature. The property that has to hold is narrow — old
  * findings stay hidden through unrelated edits, genuinely new ones do not.
  */

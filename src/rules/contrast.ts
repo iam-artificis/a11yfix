@@ -73,6 +73,21 @@ function pairFor(el: Element, ctx: { palette: import('../design/palette.js').Pal
   // very common design mistake and stays reported.
   if (bg.provenance === 'default' && contrastRatio(fgRgb, bgRgb) < 1.5) return null;
 
+  // The same argument, one step further, for a background that *was* declared.
+  //
+  // Text computed to be exactly the colour of what it sits on is not a design anybody
+  // ships; it is the signature of a backdrop this tool could not see — a hero image on a
+  // preceding sibling, a class a script adds, a rule under a selector the cascade here
+  // does not implement. On seven live Russian institutional sites this shape accounted
+  // for fifteen findings and not one of them was real, while the genuine complaint the
+  // tool exists to make — grey on white at 2.5:1 — is nowhere near this line.
+  //
+  // The cost is a real invisible-text bug going unreported. That trade is the one this
+  // tool takes everywhere else: a false finding in a paid report discredits the true
+  // ones next to it, and a missed one costs only itself.
+  const bgOpaque: RGB = { ...bgRgb, a: 1 };
+  if (toHex(flatten(fgRgb, bgOpaque)) === toHex(bgOpaque)) return null;
+
   return { fg, bg, fgRgb, bgRgb };
 }
 

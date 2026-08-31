@@ -1,6 +1,8 @@
 import type { Element, ParsedMarkup } from '../parse/markup.js';
 import { getAttr } from '../parse/markup.js';
-import { asSimpleSelector, isBoldWeight, lengthToPx, parseCss, parseInlineStyle, relativeFontFactor } from '../parse/css.js';
+import { isBoldWeight, lengthToPx, parseCss, parseInlineStyle, relativeFontFactor } from '../parse/css.js';
+import type { ParsedSelector } from './selector.js';
+import { matchesSelector, parseSelector } from './selector.js';
 import type { CssRule, Declaration } from '../parse/css.js';
 import { resolveTailwindClasses, resolveTailwindColor } from './tailwind.js';
 import { flatten, parseColor, toHex } from '../color.js';
@@ -96,13 +98,54 @@ export interface StylesheetSource {
  */
 const DEFAULT_BACKGROUND = '#ffffff';
 
+/**
+ * The tokens of a shorthand value, split on whitespace that is outside brackets.
+ *
+ * A plain split tears `var(--black, #000)` and `rgb(0, 0, 0)` in half, and the half that
+ * survives parses as nothing — which is how a page ends up with no background at all
+ * rather than the one it declared.
+ */
+function splitTopLevel(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i] as string;
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /\s/.test(ch)) {
+      if (i > start) parts.push(value.slice(start, i));
+      start = i + 1;
+    }
+  }
+  if (start < value.length) parts.push(value.slice(start));
+  return parts;
+}
+
+/**
+ * Components of a `background` shorthand that carry no colour and hide nothing.
+ *
+ * A shorthand made only of these paints nothing, so the element is transparent and the
+ * walk should continue past it. Anything outside this set that is also not a colour is a
+ * value we do not understand, and the safe reading of that is "unknown", not "white".
+ */
+const BACKGROUND_KEYWORDS = new Set([
+  'none', 'repeat', 'repeat-x', 'repeat-y', 'no-repeat', 'space', 'round',
+  'scroll', 'fixed', 'local', 'center', 'top', 'bottom', 'left', 'right',
+  'cover', 'contain', 'auto', 'border-box', 'padding-box', 'content-box',
+]);
+
+function isBackgroundMetric(part: string): boolean {
+  return part === '/' || /^[+-]?(?:\d*\.)?\d+(?:px|em|rem|%|vw|vh|vmin|vmax|pt|pc|cm|mm|in|ex|ch|q)?$/i.test(part);
+}
+
 export class Palette {
   private readonly styles = new Map<Element, ElementStyle>();
   /** Per parent: the children that paint over their siblings. See coveredByOverlay. */
   private readonly overlayCache = new Map<Element, Element[]>();
   private readonly cssRules: CssRule[] = [];
   /** Selector key -> the rules carrying it, with their specificity and source position. */
-  private readonly ruleIndex = new Map<string, { rank: number; index: number }[]>();
+  private readonly ruleIndex = new Map<string, { rank: number; index: number; sel: ParsedSelector }[]>();
   /**
    * Rules that came from a <style> block in the very file being analysed. Only these
    * carry offsets a fix can write to; a rule from an external stylesheet describes a
@@ -161,16 +204,13 @@ export class Palette {
    * in source order.
    */
   private buildRuleIndex(): void {
-    const SPECIFICITY = { tag: 0, class: 1, id: 2 } as const;
-    const PREFIX = { tag: 't:', class: 'c:', id: 'i:' } as const;
     this.cssRules.forEach((rule, index) => {
       for (const sel of rule.selectors) {
-        const simple = asSimpleSelector(sel);
-        if (simple === null) continue;
-        const key = PREFIX[simple.kind] + simple.name;
-        const bucket = this.ruleIndex.get(key);
-        const entry = { rank: SPECIFICITY[simple.kind], index };
-        if (bucket === undefined) this.ruleIndex.set(key, [entry]);
+        const parsed = parseSelector(sel);
+        if (parsed === null) continue;
+        const bucket = this.ruleIndex.get(parsed.key);
+        const entry = { rank: parsed.specificity, index, sel: parsed };
+        if (bucket === undefined) this.ruleIndex.set(parsed.key, [entry]);
         else bucket.push(entry);
       }
     });
@@ -251,6 +291,9 @@ export class Palette {
       const hits = this.ruleIndex.get(key);
       if (hits === undefined) return;
       for (const hit of hits) {
+        // The index narrows by the subject's own tag, id or class; the ancestor half of
+        // the selector still has to be checked against the tree.
+        if (!matchesSelector(el, hit.sel)) continue;
         // A rule may list several selectors; the one that matches most specifically wins.
         const prev = best.get(hit.index);
         if (prev === undefined || hit.rank > prev) best.set(hit.index, hit.rank);
@@ -331,9 +374,31 @@ export class Palette {
           out.backgroundUnknown = true;
           delete out.background;
         } else {
-          const colour = v.split(/\s+/).find((part) => /^(#|rgb|hsl|[a-z]+$)/i.test(part));
+          const parts = splitTopLevel(v);
+          // A custom property is kept whole and resolved later, exactly as `color:
+          // var(--x)` already is. shm.ru declares `background: var(--black)` on the block
+          // its white headings sit in; reading that as "no background" put every one of
+          // them on the page default and reported white on white, twenty-nine times.
+          const colour = parts.find((part) => /^var\(/i.test(part) || parseColor(part) !== null);
           if (colour !== undefined) {
             out.background = { value: colour, provenance, from: el, ...(span !== undefined ? { span } : {}) };
+            // The shorthand resets background-image, so whatever made this unknown is
+            // painted over by what we just read.
+            delete out.backgroundUnknown;
+          } else if (
+            parts.every(
+              (part) => BACKGROUND_KEYWORDS.has(part.toLowerCase()) || isBackgroundMetric(part),
+            )
+          ) {
+            // Position, size and repeat only: the element paints nothing and the walk
+            // should carry on past it.
+            delete out.background;
+          } else {
+            // Something we do not understand — `inherit`, an unresolved function, a
+            // vendor value. Guessing white here is how a dark section becomes eight
+            // findings about text that is perfectly readable.
+            out.backgroundUnknown = true;
+            delete out.background;
           }
         }
       } else if (d.prop === 'background-image') {

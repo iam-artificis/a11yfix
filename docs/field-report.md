@@ -14,7 +14,7 @@ Measured on 2026-08-31 with a11yfix 0.1.0.
 | `vercel/commerce` | `3761e52` | 45 | 4 | 1 | 1 | 0.08s |
 | `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 26 | 14 | 7 | 0.21s |
 | `documenso/documenso` | `5082b47` | 674 | 52 | 14 | 3 | 0.38s |
-| `calcom/cal.com` | `176037d` | 989 | 827 | 542 | 12 | 0.55s |
+| `calcom/cal.com` | `176037d` | 989 | 828 | 542 | 12 | 0.59s |
 | `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 71 | 357 | 1.32s |
 
 These are well-built projects by people who care. The point of the table is not that they
@@ -23,23 +23,67 @@ produce, and that a scan of three thousand files finishes before you look away.
 
 ## Read the cal.com row properly
 
-827 errors is not what it looks like. **1256 of its 1381 findings are in a single file**:
+828 errors is not what it looks like. **1256 of its 1382 findings are in a single file**:
 `apps/web/public/country-flag-icons/3x2/index.html`, a demo page vendored from an npm
 package, listing 250 flags as unlabelled images inside unlabelled links.
 
 The tool says so itself at the end of the run:
 
 ```
-1256 of those 1381 findings are in one file: apps/web/public/country-flag-icons/3x2/index.html
+1256 of those 1382 findings are in one file: apps/web/public/country-flag-icons/3x2/index.html
 If it is vendored or generated, exclude it before reading the rest.
 ```
 
-Excluding it leaves 125 findings across 988 files, which is the number that means
+Excluding it leaves 126 findings across 988 files, which is the number that means
 something. The findings in that file are all technically correct — it really is 250
 unnamed links — and none of them are cal.com's to fix.
 
 This is the honest shape of static analysis on a monorepo, and it is why the report leads
 with the count for the worst file rather than letting a reader scroll to that conclusion.
+
+## What scanning live sites changed
+
+Adding URL input turned a second kind of input on: hand-written CSS on a CMS, rather than
+Tailwind classes in a repository. The first live scan found three defects that five
+repositories and two hundred tests had never touched, all in the tool's flagship rule, and
+all in the same direction — an unread background silently became the page default.
+
+**A custom property in a `background` shorthand.** `background: var(--black)` is how
+shm.ru sets its dark section. The shorthand reader looked for a token starting with `#`,
+`rgb` or `hsl`, found none, and stored nothing — so the white headings inside it were
+measured against the page default and reported as white on white. **Twenty-nine of the
+thirty-two contrast findings on that page were that.** Custom properties are now followed
+in the shorthand exactly as they already were in `color`.
+
+**A value split on whitespace.** `var(--black, #000)` and `rgb(0, 0, 0)` contain spaces.
+Splitting the value on whitespace left `var(--black,` and `#000)`, neither of which parses
+as anything. Splitting now respects brackets.
+
+**Silence where "unknown" was meant.** A `background` the reader could not classify set
+neither a colour nor the unknown flag, and the ancestor walk stepped straight past it. The
+rule now is that only a shorthand made purely of positions and repeats leaves an element
+transparent; anything unrecognised is unknown, which suppresses the finding rather than
+inventing one.
+
+Two further changes came out of the same measurement:
+
+**Text exactly the colour of its background is no longer reported.** 1.00:1 is not a
+design anybody ships; it is what the tool computes when it did not see the real backdrop.
+Across seven live sites this shape produced fifteen findings and none of them was real. A
+genuine invisible-text bug now goes unreported, which is the trade this tool takes
+everywhere: a false finding in a paid report discredits the true ones beside it.
+
+**Descendant and compound selectors are read.** `.footer p { color: #999 }` is how people
+write CSS by hand, and until now it styled nothing the tool could see. The old limit was
+drawn on a sound principle — do not pretend to resolve a cascade you cannot see — but one
+notch too tight: ancestry is a *fact* in the parsed markup, so `.card .title` is decidable,
+while `:hover`, `[data-x]` and `+` are not and stay refused. This is a precision fix as
+much as a coverage one: a rule that would have overridden the one we did apply, ignored,
+turns legible text into a finding.
+
+On the repository corpus this changed exactly one number. `calcom/cal.com` gained a single
+error — `.email-footer p { color: #a8aaaf }` on `#f2f4f6`, 2.11:1, in an email template —
+which is real, and which the tool could not previously see.
 
 ## What the calibration pass changed
 
@@ -137,44 +181,44 @@ exact numbers stay checkable.
 
 ## A second measurement: nine Russian institutional sites
 
-The table above is Western open source, where the tool reads a repository. This one is a
-different exercise and a narrower one: nine live `.ru` sites of libraries, museums and
-regulators, fetched as HTML over HTTP on 2026-08-31 and scanned as single files.
+The table above is Western open source, where the tool reads a repository. This one is
+different work and narrower: nine live `.ru` sites of libraries, museums and regulators,
+scanned over HTTP on 2026-08-31.
 
 Two things follow from that, and neither is small. There is no repository, so there is no
 patch — the tool can say what is wrong but not fix it. And a client-rendered application
-serves an empty shell to `curl`, which is why `msu.ru` returns two findings: there is no
-page there to read. The numbers below are what static analysis sees in the HTML that
-arrives, not a judgement about any of these organisations.
+serves an empty shell to anything that is not a browser, which is why `msu.ru` returns two
+findings: there is no page there to read. The tool says so itself rather than reporting a
+near-clean result.
 
 | Site | Errors | Warnings | Info | Overlay | Total |
 |---|---|---|---|---|---|
-| `shm.ru` | 114 | 94 | 112 | 4 | 320 |
-| `spbu.ru` | 114 | 10 | 66 | 2 | 190 |
-| `obrnadzor.gov.ru` | 38 | 58 | 63 | — | 159 |
-| `rsl.ru` | 54 | 18 | 67 | — | 139 |
-| `nlr.ru` | 32 | 52 | 34 | 2 | 118 |
-| `tretyakovgallery.ru` | 29 | 21 | 48 | — | 98 |
-| `rusmuseum.ru` | 11 | 14 | 18 | — | 43 |
-| `libnn.ru` | 26 | 13 | 3 | — | 42 |
+| `shm.ru` | 158 | 94 | 112 | 4 | 364 |
+| `spbu.ru` | 178 | 10 | 66 | 2 | 254 |
+| `rsl.ru` | 129 | 18 | 67 | — | 214 |
+| `obrnadzor.gov.ru` | 77 | 58 | 63 | — | 198 |
+| `nlr.ru` | 34 | 52 | 34 | 2 | 120 |
+| `tretyakovgallery.ru` | 40 | 21 | 48 | — | 109 |
+| `rusmuseum.ru` | 10 | 14 | 18 | — | 42 |
+| `libnn.ru` | 24 | 13 | 5 | — | 42 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1111 total with the same suspicion the cal.com row deserves. 243 of the warnings
-are `target="_blank"` without `rel="noopener"` and 228 of the info findings are a new
+Read the 1345 total with the same suspicion the cal.com row deserves. 243 of the warnings
+are `target="_blank"` without `rel="noopener"` and 230 of the info findings are a new
 window opened without warning — conventions, and on this evidence near-universal ones.
-Strip those and what is left is 640, of which the load-bearing part is:
+Strip those and 872 remain, of which the load-bearing part is:
 
+- **238 pieces of text** below the contrast their size requires;
 - **172 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (122);
 - **134 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
-- **36 elements** carrying `role="img"` with no accessible name;
-- **21 form fields** with no label of any kind.
+- **36 elements** carrying `role="img"` with no accessible name.
 
 ### The finding the whole rule set is built around
 
-Three of the nine sites carry a «версия для слабовидящих» switch, and A11Y-DOC-016 found
-all three — twice by the link's own text, twice by an `<input type="submit">` whose only
-label is its `value`, and four times on one site by the `bvi` stylesheet, script and the
-two buttons that open it.
+Three of the nine carry a «версия для слабовидящих» switch, and A11Y-DOC-016 found all
+three — twice by the link's own text, twice by an `<input type="submit">` whose only label
+is its `value`, and four times on one site by the `bvi` stylesheet, script and the two
+buttons that open it.
 
 On all three, the barriers the switch cannot touch are present anyway:
 
@@ -193,12 +237,14 @@ problem when it is mistaken for the work.
 ### Reproducing this table
 
 ```bash
-mkdir ru && cd ru
 for u in shm.ru spbu.ru obrnadzor.gov.ru rsl.ru nlr.ru \
          tretyakovgallery.ru rusmuseum.ru libnn.ru msu.ru; do
-  curl -sSL -A "Mozilla/5.0" "https://$u/" -o "$u.html"
+  npx a11yfix "https://$u/" --json | node -e '
+    let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{
+      const t=JSON.parse(s).totals;
+      console.log(process.argv[1], t.errors, t.warnings, t.info);
+    });' "$u"
 done
-npx a11yfix . --json
 ```
 
 Live sites change without notice, so unlike the repository table these numbers are not

@@ -7,9 +7,12 @@
  * available when reading files. Claiming otherwise is how automated accessibility tools
  * end up reporting confident nonsense.
  *
- * What it does instead is narrow and honest: find declarations whose selector is simple
- * enough to attribute to an element with certainty (a single class, id, or tag), and
- * report everything else as undetermined so the caller can say so out loud.
+ * What it does instead is narrow and honest: read the declarations, and leave the
+ * question of which elements a selector reaches to `src/design/selector.ts`, which
+ * accepts only selectors whose effect can be decided by looking at the element and its
+ * ancestors — a compound, a descendant, a child — and refuses everything whose answer
+ * depends on state, on attributes, or on sibling order. What it refuses is reported as
+ * undetermined rather than guessed at.
  */
 
 export interface Declaration {
@@ -231,26 +234,6 @@ function splitSelectors(prelude: string): string[] {
   }
   if (buf.trim() !== '') out.push(buf.trim());
   return out;
-}
-
-export interface SimpleSelector {
-  readonly kind: 'class' | 'id' | 'tag';
-  readonly name: string;
-}
-
-/**
- * Recognise selectors simple enough to attribute to an element with certainty.
- *
- * `.btn` is safe. `.card .btn:hover` is not: it depends on ancestry and state we cannot
- * evaluate, and guessing would produce a fix for a colour combination that may never
- * appear on screen. Anything not matched here is deliberately treated as unknown.
- */
-export function asSimpleSelector(selector: string): SimpleSelector | null {
-  const s = selector.trim();
-  if (/^\.[A-Za-z_][-\w]*$/.test(s)) return { kind: 'class', name: s.slice(1) };
-  if (/^#[A-Za-z_][-\w]*$/.test(s)) return { kind: 'id', name: s.slice(1) };
-  if (/^[a-z][a-z0-9]*$/.test(s)) return { kind: 'tag', name: s.toLowerCase() };
-  return null;
 }
 
 /** Parse a `style="..."` attribute into declarations, with offsets relative to `base`. */

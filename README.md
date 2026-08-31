@@ -67,7 +67,7 @@ overlay — accessiBe, UserWay, AudioEye, or the `bvi.js` «версия для 
 that is the usual answer to ГОСТ Р 52872-2019 — and says, as `info` and without asking
 you to remove anything, what it does not change: an image with no `alt` has no `alt` at
 any font size. On nine live Russian institutional sites, three carried a switch and all
-three had images with no alternative text behind it. See [the field
+three had images with no alternative text behind it — 79 of them. See [the field
 report](docs/field-report.md#a-second-measurement-nine-russian-institutional-sites).
 
 ## What a run looks like
@@ -162,7 +162,7 @@ overlay vendor for, and burying the caveat at the bottom is how that happens.
 ## Adopting on a project that already has findings
 
 The first run on an existing application is not going to be zero. A real one produced
-1381 findings, and nobody fixes 1381 things before merging the next feature. Record them
+1382 findings, and nobody fixes 1382 things before merging the next feature. Record them
 once and gate on the difference:
 
 ```bash
@@ -316,7 +316,7 @@ Measured against public repositories at the time of writing:
 | `vercel/commerce` | 45 | 4 | 1 |
 | `tailwindlabs/tailwindcss.com` | 150 | 26 | 14 |
 | `documenso/documenso` | 674 | 52 | 14 |
-| `calcom/cal.com` | 989 | 827 | 542 |
+| `calcom/cal.com` | 989 | 828 | 542 |
 | `shadcn-ui/ui` | 3334 | 100 | 71 |
 
 Getting there meant fixing five classes of confident, wrong finding that only real code

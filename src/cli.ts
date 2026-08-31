@@ -11,7 +11,7 @@ import { countByFixClass, fixClass } from './fix/classify.js';
 import { unifiedDiff } from './fix/apply.js';
 import { ALL_RULES } from './rules/index.js';
 import type { StylesheetSource } from './design/palette.js';
-import { fetchPage, isUrl } from './fetch.js';
+import { fetchPage, fetchSitemap, isUrl } from './fetch.js';
 import type { FetchedPage } from './fetch.js';
 
 /**
@@ -62,6 +62,10 @@ interface Options {
   writeFailures?: { file: string; reason: string }[];
   /** Pages read over HTTP, filled in during the run. Empty for an ordinary scan. */
   fetched?: readonly FetchedPage[];
+  /** URL of a sitemap to take the page list from. */
+  sitemap?: string;
+  /** Set when --max-files was passed, so the lower default for a site scan can stand. */
+  maxFilesFromFlag: boolean;
   help: boolean;
   version: boolean;
   /**
@@ -106,6 +110,7 @@ function parseArgs(argv: readonly string[]): Options {
     reportLang: 'en',
     ignore: [],
     levelFromFlag: false,
+    maxFilesFromFlag: false,
     help: false,
     version: false,
     maxFiles: 5000,
@@ -183,7 +188,23 @@ function parseArgs(argv: readonly string[]): Options {
         if (v !== undefined) o.ignore.push(v);
         break;
       }
-      case '--max-files': o.maxFiles = Number(argv[++i]) || o.maxFiles; break;
+      case '--max-files': {
+        const n = Number(argv[++i]);
+        if (Number.isFinite(n) && n > 0) {
+          o.maxFiles = n;
+          o.maxFilesFromFlag = true;
+        }
+        break;
+      }
+      case '--sitemap': {
+        const v = argv[++i];
+        if (v === undefined || !isUrl(v)) {
+          o.error = '--sitemap takes the URL of a sitemap.xml';
+          break;
+        }
+        o.sitemap = v;
+        break;
+      }
       default:
         if (!a.startsWith('-')) o.paths.push(a);
     }
@@ -468,12 +489,15 @@ OPTIONS
   --report [PATH]     Write a standalone HTML audit report (default a11yfix-report.html)
   --lang en|ru        Language of that report (default en). The terminal stays English.
   --rules             List every rule and exit
-  --max-files N       Safety limit on files scanned (default: 5000)
+  --sitemap URL       Take the page list from a site's sitemap.xml
+  --max-files N       Safety limit on files scanned (default: 5000; 50 for --sitemap)
   --version, -v
   --help, -h
 
 SCANNING A LIVE PAGE
   a11yfix https://example.ru/            # the HTML the server sends, and its own CSS
+  a11yfix https://a.ru/ https://a.ru/o/  # several pages in one report
+  a11yfix --sitemap https://a.ru/sitemap.xml   # the pages the site lists itself
 
   Reads one page and the stylesheets it links from its own origin. No script is
   run, so a page assembled in the browser arrives nearly empty — that is reported
@@ -547,34 +571,72 @@ async function main(): Promise<number> {
   // whose subject nobody can state. One or the other.
   const urls = opts.paths.filter(isUrl);
   const localPaths = opts.paths.filter((p) => !isUrl(p));
-  if (urls.length > 0 && localPaths.length > 0) {
-    console.error('Scan a URL or scan files, not both in one run.');
+  // `paths` defaults to ['.'], so a --sitemap run with no path still carries one. It is
+  // dropped rather than scanned: nobody typing --sitemap meant "and this directory too".
+  const localFromDefault = opts.sitemap !== undefined && localPaths.length === 1 && localPaths[0] === '.';
+  const wantsFiles = localPaths.length > 0 && !localFromDefault;
+  const wantsWeb = urls.length > 0 || opts.sitemap !== undefined;
+
+  if (wantsWeb && wantsFiles) {
+    console.error('Scan the web or scan files, not both in one run.');
     return 2;
   }
   // There is no file on disk behind a URL, so there is nothing to patch and nothing a
   // diff could be applied to. Refusing beats handing someone a diff against a copy of a
   // page they do not have.
-  if (urls.length > 0 && (opts.fix || opts.diff || opts.baselineWrite)) {
+  if (wantsWeb && (opts.fix || opts.diff || opts.baselineWrite)) {
     console.error(
       'A URL has no source file to change: --fix, --diff and --baseline-write need a local path.',
     );
     return 2;
   }
 
-  const pages: FetchedPage[] = [];
-  for (const u of urls) {
+  const toRead = [...urls];
+  if (opts.sitemap !== undefined) {
+    // A site scan gets its own default. 5000 is a sane ceiling for files on disk and an
+    // unreasonable number of requests to make to somebody else's server; whoever wants
+    // more says so with --max-files.
+    const cap = opts.maxFilesFromFlag ? opts.maxFiles : 50;
     try {
-      pages.push(await fetchPage(u));
+      const found = await fetchSitemap(opts.sitemap, cap);
+      for (const note of found.notes) console.error(c(C.grey, note));
+      console.error(
+        c(C.grey, `${opts.sitemap}: reading ${plural(found.urls.length, 'page')}`),
+      );
+      toRead.push(...found.urls);
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       return 2;
     }
   }
 
+  const pages: FetchedPage[] = [];
+  const unread: string[] = [];
+  for (const u of toRead) {
+    // Sequential, with a pause when there is more than one. These are small institutional
+    // servers and the scan is uninvited; going slowly costs nothing that matters.
+    if (pages.length + unread.length > 0) await new Promise((r) => setTimeout(r, 200));
+    try {
+      pages.push(await fetchPage(u));
+    } catch (err) {
+      unread.push(`${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  // One page asked for and refused is a failed run. One page of fifty is a footnote.
+  if (pages.length === 0 && unread.length > 0) {
+    for (const line of unread) console.error(line);
+    return 2;
+  }
+  if (unread.length > 0) {
+    console.error(c(C.yellow, `${plural(unread.length, 'page')} could not be read:`));
+    for (const line of unread.slice(0, 10)) console.error(c(C.grey, `  ${line}`));
+    if (unread.length > 10) console.error(c(C.grey, `  …and ${unread.length - 10} more`));
+  }
+
   opts.fetched = pages;
 
   const collected: string[] = [];
-  for (const p of localPaths) {
+  for (const p of wantsFiles ? localPaths : []) {
     collected.push(...(await collectFiles(resolve(p), opts.maxFiles - collected.length)));
   }
   const files = collected.filter((f) => !isIgnored(f, ignore, configDir));
@@ -601,9 +663,6 @@ async function main(): Promise<number> {
     return r === '' || r.startsWith('..') ? '' : r;
   };
   const sheets: StylesheetSource[] = [];
-  // A sheet the fetched page links itself applies to that page. It carries no scope,
-  // which is right here: there are no packages, and the page is the whole scan.
-  for (const page of pages) sheets.push(...page.sheets);
   const packageRoots = new Map<string, string>();
   for (const f of files) {
     if (kindOf(f) !== 'css') continue;
@@ -631,9 +690,23 @@ async function main(): Promise<number> {
         : 'automatic'
       : null;
 
-  const scanned: { file: string; absolute: string; source: string }[] = [];
+  // Each fetched page carries its own stylesheets rather than sharing one pile. Two
+  // pages of a site usually link the same CSS, but "usually" is not a basis for letting
+  // one page's rules colour another's text — that is the same mistake the package-scoping
+  // work fixed for repositories, arriving by a different road.
+  const scanned: {
+    file: string;
+    absolute: string;
+    source: string;
+    sheets: readonly StylesheetSource[];
+  }[] = [];
   for (const page of pages) {
-    scanned.push({ file: page.file, absolute: page.url, source: page.html });
+    scanned.push({
+      file: page.file,
+      absolute: page.url,
+      source: page.html,
+      sheets: page.sheets,
+    });
   }
   for (const f of files) {
     if (kindOf(f) === 'css') continue;
@@ -643,15 +716,15 @@ async function main(): Promise<number> {
     } catch {
       continue;
     }
-    scanned.push({ file: relative(cwd, f).split(sep).join('/'), absolute: f, source });
+    scanned.push({ file: relative(cwd, f).split(sep).join('/'), absolute: f, source, sheets });
   }
 
   const results = [];
-  for (const { file: rel, absolute, source } of scanned) {
+  for (const { file: rel, absolute, source, sheets: own } of scanned) {
     const r = analyseSource(rel, source, {
       rules: ALL_RULES,
       level: opts.level,
-      stylesheets: sheets,
+      stylesheets: own,
       fixThreshold: threshold,
       markTodos: opts.markTodos,
       disabled,
