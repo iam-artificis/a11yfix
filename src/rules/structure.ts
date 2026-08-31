@@ -1459,6 +1459,163 @@ const skipLink: Rule = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// A11Y-DOC-016 — accessibility overlay widget
+// ---------------------------------------------------------------------------
+
+/**
+ * Scripts and stylesheets whose whole product is a switch that restyles the page.
+ *
+ * `bvi` matters most by volume: bvi.js — «Кнопка "Версия для слабовидящих"» — is
+ * installed on a very large number of Russian institutional sites, usually as the
+ * entire answer to ГОСТ Р 52872-2019. The Western vendors are here for the same
+ * reason: one control, applied over markup nobody changed.
+ *
+ * Matched as substrings of the URL, so a version or a CDN prefix does not defeat
+ * them. The `bvi` entries all carry a dot or a slash on purpose — bare `bvi` appears
+ * inside `webvisor`, which is on a large fraction of Russian sites and has nothing to
+ * do with this.
+ */
+const OVERLAY_ASSETS = [
+  'accessibe',
+  'acsbapp',
+  'userway',
+  'audioeye',
+  'equalweb',
+  'allyable',
+  'accessiway',
+  'maxaccess',
+  'mibok',
+  'slabovid',
+];
+
+/**
+ * The bvi family, whose filenames vary — bvi.js, bvi.min.js, bvi.min.css, js/bvi/init.js.
+ * A bare 'bvi' substring cannot be used: 'webvisor' contains one, and Yandex Metrica puts
+ * webvisor on a large fraction of Russian sites. Requiring a dot, dash or slash after it
+ * separates the two.
+ */
+const BVI_ASSET = /bvi[.\-/]/;
+
+/**
+ * Class and id markers left by the same widgets in the page's own markup — the panel
+ * they inject, or a button a site author wired up by hand.
+ *
+ * Narrower than the asset list on purpose: these are matched against every element in
+ * the file, so a loose token here would fire on ordinary pages. Each is a name only an
+ * overlay uses. `slabovid` covers the transliterated classes people write themselves
+ * (`gim-slabovidenie-btn` on shm.ru, for one).
+ */
+const OVERLAY_MARKUP = ['bvi-open', 'bvi-panel', 'bvi-block', 'acsb-trigger', 'userway_', 'slabovid'];
+
+/** Link, button or input text offering to restyle the page for low vision. */
+const OVERLAY_TEXT =
+  /слабовидящ|для\s+инвалидов\s+по\s+зрению|специальн[а-яё]*\s+верси|accessibility\s+(?:menu|widget|toolbar)/i;
+
+/**
+ * A control's label is short. Capping the text we test is what separates the switch
+ * from an article that happens to mention слабовидящие readers — and it also stops a
+ * handler on a large wrapper from dragging half the page into the match.
+ */
+const MAX_LABEL = 120;
+
+const OVERLAY_CLICK = ['onclick', '@click', 'v-on:click', 'on:click', 'x-on:click'];
+
+const overlayWidget: Rule = {
+  id: 'A11Y-DOC-016',
+  title: 'Accessibility overlay on the page',
+  // Deliberately no criterion. Having an overlay violates nothing; what it does is give
+  // the owner of the site a reason to believe the criteria are already met.
+  wcag: [],
+  level: 'A',
+  severity: 'info',
+  summary: 'A widget that restyles the page for low vision, which is not the same as fixing it.',
+  appliesTo: ['html', 'jsx', 'vue', 'svelte'],
+  run(ctx) {
+    const out: Violation[] = [];
+    const seen = new Set<number>();
+
+    const report = (el: Element, what: string): void => {
+      if (seen.has(el.openStart)) return;
+      seen.add(el.openStart);
+      out.push(
+        ctx.report({
+          ruleId: overlayWidget.id,
+          wcag: overlayWidget.wcag,
+          level: overlayWidget.level,
+          severity: overlayWidget.severity,
+          start: el.openStart,
+          end: el.openEnd,
+          message: `${what} restyles the page for low vision.`,
+          impact:
+            'It changes size, colour and spacing, which genuinely helps some people. It ' +
+            'does not change the markup a screen reader reads: an image with no alt has ' +
+            'no alt at any font size, a field labelled only by its placeholder is still ' +
+            'unlabelled, and a table with no header cells is still a stream of numbers. ' +
+            'Everything else in this report is something the switch does not address.',
+          fix: advice(
+            'manual',
+            'Keep it if people use it, and fix the markup underneath as well.',
+            'Nothing here says remove it — a font-size and contrast control is useful on ' +
+              'its own. It is not a substitute for the rest of this report, and the two ' +
+              'are routinely sold as if they were the same thing: in 2025 the US Federal ' +
+              'Trade Commission ordered an overlay vendor to pay $1 million over claims ' +
+              'that its widget made any website conform to WCAG.',
+          ),
+        }),
+      );
+    };
+
+    for (const el of ctx.markup.elements) {
+      if (isComponent(el)) continue;
+
+      if (el.tagLower === 'script' || el.tagLower === 'link') {
+        const url = (literalAttr(el, 'src') ?? literalAttr(el, 'href') ?? '').toLowerCase();
+        const hit =
+          url === ''
+            ? undefined
+            : (OVERLAY_ASSETS.find((m) => url.includes(m)) ?? BVI_ASSET.exec(url)?.[0]);
+        if (hit !== undefined) report(el, `A <${el.tagLower}> whose URL contains "${hit}"`);
+        continue;
+      }
+
+      const names = `${literalAttr(el, 'class') ?? literalAttr(el, 'className') ?? ''} ${
+        literalAttr(el, 'id') ?? ''
+      }`.toLowerCase();
+      const marker = names.trim() === '' ? undefined : OVERLAY_MARKUP.find((m) => names.includes(m));
+      if (marker !== undefined) {
+        report(el, `This <${el.tagLower}>, marked "${marker}",`);
+        continue;
+      }
+
+      // Only things that act as controls. A paragraph about services for readers with
+      // low vision is not a switch, and reporting it would be exactly the kind of
+      // keyword matching this tool is written against.
+      const control =
+        el.tagLower === 'a' ||
+        el.tagLower === 'button' ||
+        el.tagLower === 'input' ||
+        el.attrs.some((a) => OVERLAY_CLICK.includes(a.nameLower));
+      if (!control) continue;
+
+      // `value` and `alt` are here for <input type="submit"> and <input type="image">,
+      // which is how a Drupal or Bitrix theme usually renders the switch.
+      const label = [
+        el.tagLower === 'input' ? '' : textOf(el),
+        literalAttr(el, 'aria-label') ?? '',
+        literalAttr(el, 'title') ?? '',
+        literalAttr(el, 'value') ?? '',
+        literalAttr(el, 'alt') ?? '',
+      ]
+        .filter((s) => s !== '' && s.length <= MAX_LABEL)
+        .join(' ');
+      if (OVERLAY_TEXT.test(label)) report(el, `This <${el.tagLower}>`);
+    }
+
+    return out;
+  },
+};
+
 export const RULES: readonly Rule[] = [
   htmlHasLang,
   htmlLangValid,
@@ -1475,4 +1632,5 @@ export const RULES: readonly Rule[] = [
   oneMainLandmark,
   frameTitle,
   skipLink,
+  overlayWidget,
 ];

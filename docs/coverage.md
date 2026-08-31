@@ -6,7 +6,7 @@
 
 ## The short version
 
-A11yFix ships **69 rules** touching **17 of the 55**
+A11yFix ships **70 rules** touching **17 of the 55**
 WCAG 2.2 A and AA success criteria listed here.
 
 **No criterion is fully covered by automation, and this table says "partial" for every
@@ -135,6 +135,7 @@ language are all judgements about intent. The tool marks them and refuses to gue
 | `A11Y-DOC-013` | 1.3.1 | A | Page has more than one main landmark |
 | `A11Y-DOC-014` | 2.4.1, 4.1.2 | A | Frame has no title |
 | `A11Y-DOC-015` | 2.4.1 | A | No way to skip the navigation |
+| `A11Y-DOC-016` | — | A | Accessibility overlay on the page |
 | `A11Y-FORM-001` | 1.3.1, 3.3.2, 4.1.2 | A | Form control has no accessible name |
 | `A11Y-FORM-002` | 1.3.1, 3.3.2, 4.1.2 | A | Placeholder used as the only label |
 | `A11Y-FORM-003` | 1.3.1 | A | Checkbox or radio has no name attribute |

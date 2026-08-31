@@ -117,7 +117,7 @@ Stated plainly, because a report that only lists successes is not a measurement.
   one with literal colours.** `shadcn-ui/ui` produced zero contrast findings for exactly
   this reason. That is the tool refusing to guess, but it is still a gap.
 
-## Reproducing the table
+## Reproducing the repository table
 
 ```bash
 for repo in vercel/commerce tailwindlabs/tailwindcss.com documenso/documenso \
@@ -134,3 +134,73 @@ done
 
 Counts will drift as those projects change. The commits in the table are pinned so the
 exact numbers stay checkable.
+
+## A second measurement: nine Russian institutional sites
+
+The table above is Western open source, where the tool reads a repository. This one is a
+different exercise and a narrower one: nine live `.ru` sites of libraries, museums and
+regulators, fetched as HTML over HTTP on 2026-08-31 and scanned as single files.
+
+Two things follow from that, and neither is small. There is no repository, so there is no
+patch — the tool can say what is wrong but not fix it. And a client-rendered application
+serves an empty shell to `curl`, which is why `msu.ru` returns two findings: there is no
+page there to read. The numbers below are what static analysis sees in the HTML that
+arrives, not a judgement about any of these organisations.
+
+| Site | Errors | Warnings | Info | Overlay | Total |
+|---|---|---|---|---|---|
+| `shm.ru` | 114 | 94 | 112 | 4 | 320 |
+| `spbu.ru` | 114 | 10 | 66 | 2 | 190 |
+| `obrnadzor.gov.ru` | 38 | 58 | 63 | — | 159 |
+| `rsl.ru` | 54 | 18 | 67 | — | 139 |
+| `nlr.ru` | 32 | 52 | 34 | 2 | 118 |
+| `tretyakovgallery.ru` | 29 | 21 | 48 | — | 98 |
+| `rusmuseum.ru` | 11 | 14 | 18 | — | 43 |
+| `libnn.ru` | 26 | 13 | 3 | — | 42 |
+| `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
+
+Read the 1111 total with the same suspicion the cal.com row deserves. 243 of the warnings
+are `target="_blank"` without `rel="noopener"` and 228 of the info findings are a new
+window opened without warning — conventions, and on this evidence near-universal ones.
+Strip those and what is left is 640, of which the load-bearing part is:
+
+- **172 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (122);
+- **134 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
+- **36 elements** carrying `role="img"` with no accessible name;
+- **21 form fields** with no label of any kind.
+
+### The finding the whole rule set is built around
+
+Three of the nine sites carry a «версия для слабовидящих» switch, and A11Y-DOC-016 found
+all three — twice by the link's own text, twice by an `<input type="submit">` whose only
+label is its `value`, and four times on one site by the `bvi` stylesheet, script and the
+two buttons that open it.
+
+On all three, the barriers the switch cannot touch are present anyway:
+
+| Site | Images with no alt | Placeholder alt | Links with no text |
+|---|---|---|---|
+| `shm.ru` | 30 | 40 | 14 |
+| `nlr.ru` | 8 | 21 | — |
+| `spbu.ru` | 1 | 2 | 69 |
+
+This is the argument, measured rather than asserted: the switch changes the size and the
+colour of the page for a reader with some sight left, and leaves a reader with none
+exactly where they were. It is also why the rule is `info` and its advice does not say to
+remove anything. A font-size and contrast control is genuinely useful. It is only a
+problem when it is mistaken for the work.
+
+### Reproducing this table
+
+```bash
+mkdir ru && cd ru
+for u in shm.ru spbu.ru obrnadzor.gov.ru rsl.ru nlr.ru \
+         tretyakovgallery.ru rusmuseum.ru libnn.ru msu.ru; do
+  curl -sSL -A "Mozilla/5.0" "https://$u/" -o "$u.html"
+done
+npx a11yfix . --json
+```
+
+Live sites change without notice, so unlike the repository table these numbers are not
+pinned and will drift. What should not drift is the shape: a small number of rules
+accounting for most of the findings, and the overlay sitting on top of them.

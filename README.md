@@ -58,9 +58,17 @@ ratio that step really reaches. It composites `bg-black/10` against what is behi
 resolves CSS custom properties and Tailwind v4 `@theme` tokens, and stops at a gradient
 or a background image instead of pretending the colour underneath is what you see.
 
-Beyond contrast, 69 rules cover images and media alternatives, form labelling, document
+Beyond contrast, 70 rules cover images and media alternatives, form labelling, document
 structure, keyboard operability, ARIA correctness, and link semantics — each anchored to
 the WCAG success criterion it implements.
+
+One of them is anchored to no criterion at all. A11Y-DOC-016 reports an accessibility
+overlay — accessiBe, UserWay, AudioEye, or the `bvi.js` «версия для слабовидящих» switch
+that is the usual answer to ГОСТ Р 52872-2019 — and says, as `info` and without asking
+you to remove anything, what it does not change: an image with no `alt` has no `alt` at
+any font size. On nine live Russian institutional sites, three carried a switch and all
+three had images with no alternative text behind it. See [the field
+report](docs/field-report.md#a-second-measurement-nine-russian-institutional-sites).
 
 ## What a run looks like
 
@@ -124,7 +132,7 @@ npx a11yfix src --fix                  # apply automatic fixes
 npx a11yfix src --fix --include-review # apply reviewable fixes too
 npx a11yfix . --json                   # machine-readable
 npx a11yfix . --all                    # include info findings and repeats
-npx a11yfix --rules                    # list all 69 rules
+npx a11yfix --rules                    # list all 70 rules
 npx a11yfix . --baseline-write         # record existing findings, then gate on new ones
 npx a11yfix . --baseline               # report only what is not in the baseline
 npx a11yfix . --report                 # standalone HTML audit report
