@@ -3,6 +3,7 @@ import { dirname, extname, join } from 'node:path';
 import type {
   FileKind,
   FileResult,
+  Fix,
   FixSafety,
   Level,
   Rule,
@@ -44,11 +45,50 @@ export function kindOf(file: string): FileKind | undefined {
   return KIND_BY_EXT[extname(file).toLowerCase()];
 }
 
-/** Trim an excerpt and neutralise control characters so printing a report is safe. */
-function excerptAt(source: string, start: number, end: number): string {
-  const raw = source.slice(start, Math.min(end, start + 160));
+/** How much of an element goes into an excerpt, before whitespace is collapsed. */
+const EXCERPT_WINDOW = 160;
+
+function tidy(raw: string): string {
   const cleaned = raw.replace(new RegExp('[\\u0000-\\u001f\\u007f]', 'g'), '').replace(/\s+/g, ' ').trim();
   return cleaned.length > 120 ? cleaned.slice(0, 119) + '…' : cleaned;
+}
+
+/** Trim an excerpt and neutralise control characters so printing a report is safe. */
+function excerptAt(source: string, start: number, end: number): string {
+  return tidy(source.slice(start, Math.min(end, start + EXCERPT_WINDOW)));
+}
+
+/**
+ * The same excerpt with the fix applied — the line as it should read.
+ *
+ * The patch is the most persuasive thing this tool produces, and the report, which is what
+ * the person paying for the work actually reads, described it in a sentence instead of
+ * showing it. It matters most where there is no patch at all: a scan of a live URL has no
+ * file to change, and a museum's content editor cannot apply a diff but can retype one
+ * line. Withholding it there withheld the whole deliverable.
+ *
+ * Only for fixes that would really be written. A `manual` fix, or one carrying an
+ * advisory, is a suggestion for a person to weigh, and printing it as the corrected line
+ * would state a certainty the tool does not have. Every edit must fall inside the window
+ * or none is shown: half a change presented as the finished line is worse than no line.
+ */
+function fixedExcerptAt(
+  source: string,
+  start: number,
+  end: number,
+  fix: Fix | undefined,
+): string | undefined {
+  if (fix === undefined || fix.edits.length === 0) return undefined;
+  if (fix.safety === 'manual' || fix.advisory !== undefined) return undefined;
+  const stop = Math.min(end, start + EXCERPT_WINDOW);
+  if (!fix.edits.every((e) => e.start >= start && e.end <= stop && e.end >= e.start)) {
+    return undefined;
+  }
+  let raw = source.slice(start, stop);
+  for (const e of [...fix.edits].sort((a, b) => b.start - a.start)) {
+    raw = raw.slice(0, e.start - start) + e.replacement + raw.slice(e.end - start);
+  }
+  return tidy(raw);
 }
 
 export interface AnalyseOptions {
@@ -90,12 +130,17 @@ export function analyseSource(
     palette,
     report(v) {
       const pos = positionAt(source, v.start);
+      const excerpt = excerptAt(source, v.start, v.end);
+      const fixed = fixedExcerptAt(source, v.start, v.end, v.fix);
       return {
         ...v,
         file,
         line: pos.line,
         column: pos.column,
-        excerpt: excerptAt(source, v.start, v.end),
+        excerpt,
+        // Identical means the edit changed something outside the window, or nothing that
+        // survives whitespace collapsing. Either way there is nothing to show.
+        ...(fixed !== undefined && fixed !== excerpt ? { excerptFixed: fixed } : {}),
       };
     },
   };

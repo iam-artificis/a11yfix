@@ -151,6 +151,7 @@ const STYLE = `
   --error-bg: #fdf2f2;
   --warning: #8a5a00;
   --warning-bg: #fdf8ee;
+  --ok: #1f6d33;
   --info: #24557a;
   --info-bg: #f1f6fa;
   --accent: #0b3d5c;
@@ -190,6 +191,14 @@ th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--
 th { font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.path { word-break: break-all; }
+pre.was, pre.now { border-left: 3px solid var(--line); padding-left: .7rem; }
+pre.was { margin-bottom: .3rem; }
+pre.now { border-left-color: var(--ok); }
+pre.now .lbl { color: var(--ok); }
+pre .lbl {
+  display: block; font-size: .68rem; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: .2rem;
+}
 .rule { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 1.25rem; overflow: hidden; break-inside: avoid; }
 .rule > .head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); }
 .rule.error > .head { background: var(--error-bg); }
@@ -426,7 +435,21 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
       w(
         `<p class="where"><code>${escapeHtml(v.file)}</code> ${escapeHtml(t.ui.line)} ${v.line}</p>`,
       );
-      w(`<pre>${escapeHtml(v.excerpt)}</pre>`);
+      // Two blocks where the change is one the tool would really write, one where it is
+      // not. The second block is the shortest honest answer to "what do I do about it",
+      // and on a URL scan — where there is no patch to hand over — it is the only form
+      // that answer can take. Where the change is a floor rather than a finish, the
+      // remedy sentence immediately below says so; that is why the label reads "after the
+      // change" and not "correct".
+      if (v.excerptFixed === undefined) {
+        w(`<pre>${escapeHtml(v.excerpt)}</pre>`);
+      } else {
+        w(`<pre class="was"><span class="lbl">${escapeHtml(t.ui.excerptNow)}</span>${escapeHtml(v.excerpt)}</pre>`);
+        w(
+          `<pre class="now"><span class="lbl">${escapeHtml(t.ui.excerptAfter)}</span>` +
+            `${escapeHtml(v.excerptFixed)}</pre>`,
+        );
+      }
       if (t.ui.impactPlacement === 'instance') {
         w(`<p class="impact">${escapeHtml(t.impact(v))}</p>`);
       }

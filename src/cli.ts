@@ -280,6 +280,10 @@ function printViolation(v: Violation, opts: Options): void {
   if (opts.quiet) return;
   console.log(`          ${c(C.dim, v.impact)}`);
   if (v.excerpt !== '') console.log(`          ${c(C.grey, v.excerpt)}`);
+  // The line after the change, where the change is one this tool would write. Scanning a
+  // URL refuses --diff — there is no file to diff against — so without this the person
+  // who came in through the mode built for them is the one who never sees the patch.
+  if (v.excerptFixed !== undefined) console.log(`          ${c(C.green, v.excerptFixed)}`);
   if (v.fix !== undefined) {
     const applicability = fixClass(v);
     if (applicability === 'manual') {

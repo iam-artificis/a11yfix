@@ -238,3 +238,95 @@ test('a fix either patches or advises, never both', () => {
     }
   }
 });
+
+
+/**
+ * The corrected line printed in the report.
+ *
+ * It is the most persuasive thing in a URL audit — the buyer cannot apply a diff, and one
+ * line they can retype is the whole deliverable — which makes it the most expensive place
+ * to be wrong. Two promises hold it up: it never appears for a change the tool would not
+ * write, and it is the real result of the real edits, not a sentence about them.
+ */
+
+const CORPUS = [
+  ['a.html', '<html><body><img src="a.png"><p style="color:#bbb">hi</p></body></html>'],
+  [
+    'b.html',
+    '<!doctype html><html><head><title>t</title></head><body><main><h1>H</h1>' +
+      '<span onclick="go()">Go</span><a href="/x" target="_blank">Docs</a>' +
+      '<li onclick="pick()">Pick</li><input type="text" name="email">' +
+      '<button></button><a href="/y"><img src="i.png"></a></main></body></html>',
+  ],
+  [
+    'c.jsx',
+    'export const A = () => (<div onClick={go}><img src="x.png" />' +
+      '<a href={url} target="_blank">go</a></div>);',
+  ],
+];
+
+test('a corrected line is offered only where the tool would really write the change', () => {
+  let offered = 0;
+  for (const [file, source] of CORPUS) {
+    for (const v of run(file, source).violations) {
+      if (v.excerptFixed === undefined) continue;
+      offered++;
+      assert.notEqual(v.fix, undefined, `${v.ruleId} shows a corrected line with no fix`);
+      assert.notEqual(
+        v.fix.safety,
+        'manual',
+        `${v.ruleId} shows a corrected line for a change it will not write`,
+      );
+      assert.equal(
+        v.fix.advisory,
+        undefined,
+        `${v.ruleId} shows a corrected line for advice, which is a suggestion, not a change`,
+      );
+      assert.ok(v.fix.edits.length > 0);
+    }
+  }
+  assert.ok(offered > 0, 'the corpus should exercise this at all');
+});
+
+test('the corrected line is the result of the edits, not a description of them', () => {
+  for (const [file, source] of CORPUS) {
+    for (const v of run(file, source).violations) {
+      if (v.excerptFixed === undefined) continue;
+      const stop = Math.min(v.end, v.start + 160);
+      let raw = source.slice(v.start, stop);
+      for (const e of [...v.fix.edits].sort((a, b) => b.start - a.start)) {
+        assert.ok(e.start >= v.start && e.end <= stop, `${v.ruleId}: edit outside the window`);
+        raw = raw.slice(0, e.start - v.start) + e.replacement + raw.slice(e.end - v.start);
+      }
+      const expected = raw.replace(/\s+/g, ' ').trim();
+      const shown = v.excerptFixed.replace(/…$/, '');
+      assert.ok(
+        expected.startsWith(shown),
+        `${v.ruleId}: shown "${shown}" is not what applying the edits produces`,
+      );
+    }
+  }
+});
+
+test('a finding a person has to decide shows no corrected line', () => {
+  // The whole promise of this tool in one assertion: it does not know what the image
+  // shows, so it must not print a line that claims to.
+  const r = run('t.html', '<html><body><img src="a.png"></body></html>');
+  const alt = r.violations.find((v) => v.ruleId === 'A11Y-IMG-001');
+  assert.notEqual(alt, undefined);
+  assert.equal(alt.excerptFixed, undefined);
+});
+
+test('a corrected line never contains a TODO marker', () => {
+  // --mark-todos writes placeholders that fail CI on purpose. Printing one in a client
+  // report as "after the change" would hand somebody a marker to paste into their page.
+  for (const [file, source] of CORPUS) {
+    for (const v of run(file, source, { markTodos: true }).violations) {
+      if (v.excerptFixed === undefined) continue;
+      assert.ok(
+        !v.excerptFixed.includes(TODO_MARKER),
+        `${v.ruleId} would show a TODO marker as the corrected line`,
+      );
+    }
+  }
+});

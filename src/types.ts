@@ -67,6 +67,13 @@ export interface Violation {
   readonly impact: string;
   /** The offending source, trimmed for display. */
   readonly excerpt: string;
+  /**
+   * The same excerpt with the fix applied, where one would really be written.
+   *
+   * Absent for a `manual` fix or an advisory: those are suggestions a person weighs, and
+   * showing one as the corrected line would claim a certainty the tool does not have.
+   */
+  readonly excerptFixed?: string;
   readonly fix?: Fix;
 }
 

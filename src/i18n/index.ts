@@ -123,6 +123,8 @@ const EN_UI: UiStrings = {
     'roughly the order they are worth fixing in, because a single wrong value in a shared ' +
     'component usually accounts for a whole block of them.',
   line: 'line',
+  excerptNow: 'now',
+  excerptAfter: 'after the change',
   more: (n) =>
     `${n} further ${n === 1 ? 'occurrence is' : 'occurrences are'} not listed here. Run ` +
     'with <code>--all</code> for a report that lists every one.',

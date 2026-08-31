@@ -192,6 +192,21 @@ npx a11yfix . --report                 # a11yfix-report.html
 npx a11yfix . --report audit.html --lang ru
 ```
 
+Where the change is one a11yfix would write, the report shows it as two lines rather
+than describing it:
+
+    now           <a href="https://shop.example.ru/" target="_blank" class="link">
+    after the     <a href="https://shop.example.ru/" target="_blank" class="link" rel="noopener">
+    change
+
+That is the whole deliverable when the scan came from a URL. There is no repository to
+send a diff to, and a content editor cannot apply one; they can retype a line. The label
+says "after the change" rather than "correct" because some patches are a floor and not a
+finish — `role="button" tabindex="0"` makes an element focusable and still needs a key
+handler — and the sentence directly under each pair says which is which. A finding only a
+person can settle, like a missing `alt`, never gets a second line: inventing one is the
+thing this tool exists not to do.
+
 `--lang ru` translates the report, not the terminal: the person who runs the command
 reads English compiler output all day, and the person the report is handed to may not.
 Every rule has Russian text and a test fails the build if one is added without it. Where

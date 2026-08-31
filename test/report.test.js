@@ -437,3 +437,43 @@ test('a scan with no fetched pages has no page table at all', () => {
   const html = renderReport(summaryFor('src/App.tsx', DIRTY), OPTIONS);
   assert.ok(!html.includes('Pages checked'));
 });
+
+
+/**
+ * The corrected line, in the report.
+ *
+ * The reader of this file is usually not the person who will type the change, and is
+ * often not a developer at all. One line as it stands and one line as it would read is
+ * the shortest thing that survives being forwarded: it needs no tooling, no repository
+ * and no explanation, and on a URL audit there is no patch to send instead.
+ */
+
+test('a change the tool would write is shown as a pair of lines, not described', () => {
+  const html = renderReport(summaryFor('page.html', DIRTY), OPTIONS);
+  assert.match(html, /<pre class="was">/);
+  assert.match(html, /<pre class="now">/);
+  // The concrete change, in the report, as code: the tool raises the foreground until
+  // it clears 4.5:1 and prints the colour it landed on.
+  assert.match(html, /color:#72777d/);
+
+  // Same number of each: a "before" with no "after" beside it is a rendering bug that
+  // reads as a finding with no answer.
+  const was = html.split('<pre class="was">').length - 1;
+  const now = html.split('<pre class="now">').length - 1;
+  assert.equal(was, now);
+  assert.ok(was > 0);
+});
+
+test('a finding only a person can settle keeps its single block', () => {
+  // The image has no alt and the tool does not know what it shows. Its block stands
+  // alone, and the remedy sentence below says a person has to write the text — while
+  // other findings on the same page still get their pair.
+  const html = renderReport(summaryFor('page.html', DIRTY), OPTIONS);
+  const from = html.indexOf('A11Y-IMG-001');
+  const section = html.slice(from, html.indexOf('</section>', from));
+  assert.ok(section.includes('<pre>&lt;img src=&quot;hero.png&quot;&gt;</pre>'));
+  assert.ok(!section.includes('<pre class="now">'), 'no invented alt text as a corrected line');
+  // And the pair does appear elsewhere in the same report, so this is a property of the
+  // finding rather than of the rendering being off.
+  assert.ok(html.includes('<pre class="now">'));
+});

@@ -75,6 +75,16 @@ export interface UiStrings {
   readonly findings: string;
   readonly findingsIntro: string;
   readonly line: string;
+  /**
+   * Labels on the pair of code blocks: the line as it stands, and the line after the
+   * change the tool proposes.
+   *
+   * "After the change" rather than "correct": some patches are a floor rather than a
+   * finish — `role="button" tabindex="0"` makes an element focusable and still needs a
+   * key handler — and the remedy sentence directly below each pair says so.
+   */
+  readonly excerptNow: string;
+  readonly excerptAfter: string;
   /** Contains our own <code> tags. */
   more(n: number): string;
   /** Contains our own <code> tags; the count is escaped by the caller. */
