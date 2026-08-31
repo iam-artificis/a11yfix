@@ -193,36 +193,39 @@ near-clean result.
 
 | Site | Errors | Warnings | Info | Overlay | Total |
 |---|---|---|---|---|---|
-| `shm.ru` | 118 | 2 | 200 | 4 | 320 |
-| `spbu.ru` | 176 | 2 | 49 | 2 | 227 |
-| `rsl.ru` | 105 | 5 | 80 | — | 190 |
-| `obrnadzor.gov.ru` | 75 | 12 | 97 | — | 184 |
-| `nlr.ru` | 18 | 5 | 82 | 2 | 105 |
+| `shm.ru` | 114 | 2 | 200 | 4 | 316 |
+| `spbu.ru` | 138 | 2 | 49 | 2 | 189 |
+| `rsl.ru` | 60 | 20 | 80 | — | 160 |
+| `obrnadzor.gov.ru` | 71 | 12 | 97 | — | 180 |
+| `nlr.ru` | 13 | 4 | 82 | 2 | 99 |
 | `tretyakovgallery.ru` | 27 | 1 | 68 | — | 96 |
-| `rusmuseum.ru` | 8 | 5 | 27 | — | 40 |
-| `libnn.ru` | 16 | 7 | 11 | — | 34 |
+| `rusmuseum.ru` | 4 | 5 | 27 | — | 36 |
+| `libnn.ru` | 15 | 7 | 11 | — | 33 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1198 total with the same suspicion the cal.com row deserves. 243 findings are
+Read the 1111 total with the same suspicion the cal.com row deserves. 243 findings are
 `target="_blank"` without `rel="noopener"` and 230 are a new window opened without
 warning — conventions, and on this evidence near-universal ones. Both are reported as
-information rather than as faults, for exactly that reason. Strip them and 725 remain, of
+information rather than as faults, for exactly that reason. Strip them and 638 remain, of
 which the part that actually blocks somebody is:
 
-- **238 pieces of text** below the contrast their size requires;
-- **134 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
-- **65 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (15);
+- **177 pieces of text** below the contrast their size requires;
+- **106 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
+- **55 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (5);
 - **36 elements** carrying `role="img"` with no accessible name;
-- **21 buttons** with no accessible name, and 21 anchors that are buttons wearing a link's
-  clothes.
+- **21 anchors** that are buttons wearing a link's clothes, and 19 buttons with no
+  accessible name;
+- **15 alt texts** that open «Изображение новости …» — the medium and the name of the CMS
+  slot, and nothing a listener learns the picture from.
 
 A further 90 are links sharing a name and going to different places, which is a real
 problem for anyone listening to a list of links and is reported as information, because
 whether it is worth fixing depends on the page.
 
-### The measurement corrected itself, downward, twice
+### The measurement corrected itself, downward, three times
 
-An earlier run of this table read 1345, and the difference is not the sites changing.
+An earlier run of this table read 1345, then 1198, and the difference is not the sites
+changing.
 
 The placeholder-alt rule tested for "contains no letters" with `[^A-Za-z]`, which is a
 claim that only the Latin alphabet contains words. `alt="Логотип Государственного
@@ -245,8 +248,24 @@ now compared by path, with a relative href taken to agree with any host, because
 fires on difference and a difference that cannot be proved is not one. 132 findings across
 the nine sites became 90.
 
-Both were found the same way: by looking at what the tool said about a real site in the
-segment it is sold into, one finding at a time. Neither was reachable from a unit test.
+The third came from an audit that did nothing but read this tool's own output against the
+served bytes, finding by finding, and it was the largest: **contrast fell from 238 to
+177**, and on the forty-eight-page whole-site scan below from 158 to 46. Four separate
+causes, all of them the same shape — the tool computing a background the browser does not
+paint. It did not read `!important`, so a museum's white event captions were measured
+against a grey a more specific rule had already lost to. It did not notice a stylesheet
+that stretches an element over the whole viewport, so text over a photograph was measured
+against the photograph's container. It flattened a translucent layer onto a white it had
+assumed rather than read, and then reported the result to two decimal places.
+
+Two findings came back the other way in the same pass. A link is now named by an
+`aria-label` on any descendant, not only on an `<img>` or `<svg>` — 28 invented findings
+on one university. And the redundant-prefix rule learned the Russian its own summary had
+always claimed it read, which is where the 15 new ones above come from: `alt="Изображение
+новости …"` is exactly the fault the rule exists for, in the corpus, silently missed.
+
+All three were found the same way: by looking at what the tool said about a real site in
+the segment it is sold into, one finding at a time. None was reachable from a unit test.
 
 ### The finding the whole rule set is built around
 
@@ -257,11 +276,11 @@ buttons that open it.
 
 On all three, the barriers the switch cannot touch are present anyway:
 
-| Site | Images with no alt | Placeholder alt | Links with no text |
+| Site | Images with no alt | Links with no text | Text below contrast |
 |---|---|---|---|
-| `shm.ru` | 30 | — | 14 |
-| `nlr.ru` | 8 | 5 | — |
-| `spbu.ru` | 1 | — | 69 |
+| `shm.ru` | 30 | 14 | 40 |
+| `spbu.ru` | 1 | 41 | 54 |
+| `nlr.ru` | 8 | — | 2 |
 
 This is the argument, measured rather than asserted: the switch changes the size and the
 colour of the page for a reader with some sight left, and leaves a reader with none
@@ -296,26 +315,29 @@ three hundred and ten it lists, taken at an even stride across the list:
 npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
 ```
 
-**4945 findings across 48 pages** — 2438 errors, 63 warnings, 2444 info — in
+**4832 findings across 48 pages** — 2326 errors, 63 warnings, 2443 info — in
 twenty-six seconds, including the fetching. Five rules account for 3890 of them:
 1362 links opening a new window with no `rel`, 782 links with no discernible text,
 617 unannounced new windows, 608 images with no `alt` at all, 521 buttons with no
-accessible name. Seventeen other rules divide the remaining 1055 between them.
+accessible name. Seventeen other rules divide the remaining 942 between them.
 
 Two of those five are conventions rather than barriers and are reported as information,
-which is what makes the report's own headline 2501 rather than 4945. That distinction was
+which is what makes the report's own headline 2389 rather than 4832. That distinction was
 made here, on this measurement: `rel="noopener"` was a warning until 1362 of a museum's
 findings turned out to be it — a quarter of an accessibility audit spent on a token with
 no WCAG criterion behind it, which every browser has implied by default since early 2021.
 The same run shed 649 findings to the `[^A-Za-z]` bug described above — all of them this
-site's Russian alt text, none of them real — and 188 more to the href-string comparison.
+site's Russian alt text, none of them real — 188 more to the href-string comparison, and
+112 more to the contrast corrections: **158 contrast findings on this site became 46**,
+and the 112 that went were the tool describing a colour the museum's own stylesheet
+overrides.
 
 Two things about that number are worth stating plainly, because both cut against it.
 
 Most of it is one template repeated. The per-page table in the report makes this
-unmissable. Below the front page — its own layout, and the worst at 320 — forty-six of the
-remaining forty-seven run between 94 and 124 findings each, across excursions,
-exhibitions, education and the research department: a spread of thirty on pages that have
+unmissable. Below the front page — its own layout, and the worst at 316 — forty-six of the
+remaining forty-seven run between 93 and 124 findings each, across excursions,
+exhibitions, education and the research department: a spread of thirty-one on pages that have
 nothing in common but their template. That is not forty-eight problems. It is a handful of
 problems in a shared header, footer and card, multiplied by forty-eight. The honest way to
 sell against this number is that the fix is far smaller than the count, not that the site
