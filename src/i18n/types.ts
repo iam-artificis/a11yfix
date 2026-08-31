@@ -30,6 +30,15 @@ export interface UiStrings {
   caveatBody(partial: number, total: number): string;
   /** Contains our own <code> tags, so it is written into the page unescaped. */
   readonly caveatBody2: string;
+  /**
+   * Extra caveat for a scan of a live URL rather than a project.
+   *
+   * A reader who is handed this cannot tell from the findings whether the page was read
+   * from a repository or fetched over HTTP, and the difference decides what the absence
+   * of a finding means: no script ran, so anything the browser would have built is not
+   * in what was checked.
+   */
+  fetchedNote(urls: string): string;
   readonly byCriterion: string;
   readonly byCriterionIntro: string;
   /**

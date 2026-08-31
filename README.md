@@ -206,6 +206,38 @@ and all 78 criteria are transcribed from the standard's own text. It still does 
 a conformance statement, and [docs/gost.md](docs/gost.md) says which 19 of the 78 the tool
 reaches and why the other 59 need a person.
 
+## Scanning a live page
+
+Not everyone who needs this has a repository to hand you. A library, a school, a museum
+whose site an agency built in 2019 has a URL and nothing else, so a URL is enough:
+
+```bash
+npx a11yfix https://example.ru/
+npx a11yfix https://example.ru/ --report audit.html --lang ru
+```
+
+It reads the HTML the server sends and the stylesheets that page links from its own
+origin. It is not a crawler and not a browser — one page, no JavaScript. That last part is
+the thing to understand rather than work around: a client-rendered application serves a
+nearly empty shell to anything that is not a browser, every rule then finds nothing, and a
+run like that must never read as a pass. So it says so:
+
+```
+read https://www.msu.ru/
+  the served HTML is nearly empty — this page is assembled by JavaScript
+  in the browser, so almost nothing here can be checked from the source.
+  Scan the repository instead, or a URL the server renders in full.
+```
+
+The report carries the same caveat, because the person holding it cannot otherwise tell
+which of the two kinds of scan produced it. `--fix`, `--diff` and `--baseline-write` are
+refused for a URL: there is no file to change, and a diff against a copy the owner does
+not have is worse than no diff.
+
+Encodings are honoured, including windows-1251, which is still in use on the sites this
+mode exists for — a page decoded as the wrong charset would have every text rule
+reporting on mojibake.
+
 ## Configuration
 
 `.a11yfixrc.json` in the project root, or an `a11yfix` key in `package.json`. A

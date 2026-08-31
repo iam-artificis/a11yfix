@@ -88,6 +88,10 @@ const EN_UI: UiStrings = {
     'behaviour, screen-reader announcements, error recovery and anything that depends on ' +
     'how the page behaves in a browser are outside what any source analyser can see. ' +
     'Those need a person, and this report does not stand in for one.',
+  fetchedNote: (urls) =>
+    `This was read over HTTP from ${urls}, not from a project's source files. No script ` +
+    'was run, so anything the page builds in the browser was not part of what was ' +
+    'checked, and no patch is offered: there is no file here to change.',
   byCriterion: 'By success criterion',
   byCriterionIntro:
     'The same findings, grouped by the part of WCAG 2.2 they fall under. Each criterion ' +

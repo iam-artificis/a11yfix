@@ -11,6 +11,8 @@ import { countByFixClass, fixClass } from './fix/classify.js';
 import { unifiedDiff } from './fix/apply.js';
 import { ALL_RULES } from './rules/index.js';
 import type { StylesheetSource } from './design/palette.js';
+import { fetchPage, isUrl } from './fetch.js';
+import type { FetchedPage } from './fetch.js';
 
 /**
  * The command line.
@@ -58,6 +60,8 @@ interface Options {
   levelFromFlag: boolean;
   /** Files --fix could not write, filled in during the run rather than parsed. */
   writeFailures?: { file: string; reason: string }[];
+  /** Pages read over HTTP, filled in during the run. Empty for an ordinary scan. */
+  fetched?: readonly FetchedPage[];
   help: boolean;
   version: boolean;
   /**
@@ -307,6 +311,24 @@ function printHuman(summary: RunSummary, opts: Options): void {
     }
   }
 
+  for (const page of opts.fetched ?? []) {
+    console.log(c(C.grey, `read ${page.url}`));
+    for (const note of page.notes) console.log(c(C.grey, `  ${note}`));
+    // The failure mode that matters: a client-rendered application serves a shell, every
+    // rule finds nothing, and the run looks like a pass. It is not one.
+    if (page.sparse) {
+      console.log(
+        c(C.yellow, '  the served HTML is nearly empty — this page is assembled by JavaScript'),
+      );
+      console.log(
+        c(C.yellow, '  in the browser, so almost nothing here can be checked from the source.'),
+      );
+      console.log(
+        c(C.yellow, '  Scan the repository instead, or a URL the server renders in full.'),
+      );
+    }
+  }
+
   const t = summary.totals;
   const filesWithFindings = summary.files.filter((f) => f.violations.length > 0);
   const suppressedByComment = summary.files.reduce((n, f) => n + (f.suppressed ?? 0), 0);
@@ -389,6 +411,16 @@ function printHuman(summary: RunSummary, opts: Options): void {
     for (const f of opts.writeFailures ?? []) {
       console.log(c(C.red, `could not write ${f.file}: ${f.reason}`));
     }
+  } else if ((opts.fetched ?? []).length > 0) {
+    if (t.automatic + t.review > 0) {
+      console.log(
+        c(
+          C.grey,
+          `${plural(t.automatic + t.review, 'finding')} could be patched, but a URL has no source ` +
+            'file to patch. Run against the project to get a diff.',
+        ),
+      );
+    }
   } else if (t.automatic + t.review > 0) {
     console.log(c(C.grey, 'Run with --fix to apply, or --diff to preview.'));
   }
@@ -417,6 +449,7 @@ const HELP = `a11yfix ${VERSION} — fix accessibility violations in source code
 
 USAGE
   a11yfix [paths...] [options]
+  a11yfix <url>      [options]
 
 OPTIONS
   --fix               Write automatic fixes to disk
@@ -438,6 +471,14 @@ OPTIONS
   --max-files N       Safety limit on files scanned (default: 5000)
   --version, -v
   --help, -h
+
+SCANNING A LIVE PAGE
+  a11yfix https://example.ru/            # the HTML the server sends, and its own CSS
+
+  Reads one page and the stylesheets it links from its own origin. No script is
+  run, so a page assembled in the browser arrives nearly empty — that is reported
+  rather than passed off as a clean result. There is no file to change, so --fix,
+  --diff and --baseline-write are refused: for a patch, scan the project.
 
 ADOPTING ON AN EXISTING PROJECT
   a11yfix . --baseline-write     # record what is already there, commit the file
@@ -502,14 +543,44 @@ async function main(): Promise<number> {
     if (setting === 'off') disabled.add(id);
   }
 
+  // A URL and a directory are different questions, and mixing them produces a report
+  // whose subject nobody can state. One or the other.
+  const urls = opts.paths.filter(isUrl);
+  const localPaths = opts.paths.filter((p) => !isUrl(p));
+  if (urls.length > 0 && localPaths.length > 0) {
+    console.error('Scan a URL or scan files, not both in one run.');
+    return 2;
+  }
+  // There is no file on disk behind a URL, so there is nothing to patch and nothing a
+  // diff could be applied to. Refusing beats handing someone a diff against a copy of a
+  // page they do not have.
+  if (urls.length > 0 && (opts.fix || opts.diff || opts.baselineWrite)) {
+    console.error(
+      'A URL has no source file to change: --fix, --diff and --baseline-write need a local path.',
+    );
+    return 2;
+  }
+
+  const pages: FetchedPage[] = [];
+  for (const u of urls) {
+    try {
+      pages.push(await fetchPage(u));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      return 2;
+    }
+  }
+
+  opts.fetched = pages;
+
   const collected: string[] = [];
-  for (const p of opts.paths) {
+  for (const p of localPaths) {
     collected.push(...(await collectFiles(resolve(p), opts.maxFiles - collected.length)));
   }
   const files = collected.filter((f) => !isIgnored(f, ignore, configDir));
   const ignoredCount = collected.length - files.length;
 
-  if (files.length === 0) {
+  if (files.length === 0 && pages.length === 0) {
     console.error(
       collected.length === 0
         ? 'No files to check. Supported: .html .jsx .tsx .vue .svelte .astro .css'
@@ -530,6 +601,9 @@ async function main(): Promise<number> {
     return r === '' || r.startsWith('..') ? '' : r;
   };
   const sheets: StylesheetSource[] = [];
+  // A sheet the fetched page links itself applies to that page. It carries no scope,
+  // which is right here: there are no packages, and the page is the whole scan.
+  for (const page of pages) sheets.push(...page.sheets);
   const packageRoots = new Map<string, string>();
   for (const f of files) {
     if (kindOf(f) !== 'css') continue;
@@ -557,7 +631,10 @@ async function main(): Promise<number> {
         : 'automatic'
       : null;
 
-  const results = [];
+  const scanned: { file: string; absolute: string; source: string }[] = [];
+  for (const page of pages) {
+    scanned.push({ file: page.file, absolute: page.url, source: page.html });
+  }
   for (const f of files) {
     if (kindOf(f) === 'css') continue;
     let source: string;
@@ -566,7 +643,11 @@ async function main(): Promise<number> {
     } catch {
       continue;
     }
-    const rel = relative(cwd, f).split(sep).join('/');
+    scanned.push({ file: relative(cwd, f).split(sep).join('/'), absolute: f, source });
+  }
+
+  const results = [];
+  for (const { file: rel, absolute, source } of scanned) {
     const r = analyseSource(rel, source, {
       rules: ALL_RULES,
       level: opts.level,
@@ -575,7 +656,7 @@ async function main(): Promise<number> {
       markTodos: opts.markTodos,
       disabled,
     });
-    results.push({ ...r, absolute: f, source });
+    results.push({ ...r, absolute, source });
   }
 
   const baselinePath = opts.baseline ?? DEFAULT_BASELINE;
@@ -709,6 +790,7 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
   if (opts.report !== undefined) {
     const html = renderReport(summary, {
       subject: reportSubject(opts.paths),
+      fetched: (opts.fetched ?? []).map((f) => f.url),
       generatedAt: new Date().toISOString(),
       level: opts.level,
       toolVersion: VERSION,

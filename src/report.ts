@@ -44,6 +44,8 @@ export interface ReportOptions {
   readonly includeInfo?: boolean;
   /** Command that produced this, printed so the reader can reproduce it. */
   readonly command?: string;
+  /** URLs this run read over HTTP, if it read any. Changes what a clean result means. */
+  readonly fetched?: readonly string[];
   /**
    * Language of the report. Defaults to English.
    *
@@ -289,6 +291,9 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   );
   // caveatBody2 carries <code> tags, which are ours rather than the scanned source's.
   w(`<p>${t.ui.caveatBody2}</p>`);
+  if (options.fetched !== undefined && options.fetched.length > 0) {
+    w(`<p><strong>${escapeHtml(t.ui.fetchedNote(options.fetched.join(', ')))}</strong></p>`);
+  }
   w('</div>');
 
   if (criterionRows.length > 0) {
