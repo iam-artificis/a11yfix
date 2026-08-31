@@ -278,3 +278,162 @@ test('a fix the tool will never apply is not counted as fixable', () => {
     'review',
   );
 });
+
+
+/**
+ * The list of pages a site audit read.
+ *
+ * A whole-site audit that does not say which pages it read invites the reader to assume
+ * it read all of them, and the reader is paying for the answer. The table is also the
+ * only place an empty page can be told apart from a clean one: a shell assembled in the
+ * browser arrives with nothing in it, and a zero next to it, unqualified, is the one
+ * number in this report that would be a lie.
+ */
+
+const multi = (pages) => {
+  const files = pages.map(([file, source]) =>
+    analyseSource(file, source, { rules: ALL_RULES, level: 'AA', fixThreshold: null }),
+  );
+  const all = files.flatMap((f) => f.violations);
+  const counts = countByFixClass(all);
+  return {
+    files,
+    totals: {
+      violations: all.length,
+      errors: all.filter((v) => v.severity === 'error').length,
+      warnings: all.filter((v) => v.severity === 'warning').length,
+      info: all.filter((v) => v.severity === 'info').length,
+      ...counts,
+      fixed: 0,
+    },
+    byRule: [],
+    durationMs: 0,
+  };
+};
+
+const SHELL = `<!doctype html>
+<html lang="en"><head><title>t</title></head><body><div id="root"></div></body></html>`;
+
+const pageRows = (html) => {
+  const table = html.slice(html.indexOf('Pages checked'));
+  const body = table.slice(table.indexOf('<tbody>'), table.indexOf('</tbody>'));
+  return body
+    .split('<tr>')
+    .slice(1)
+    .map((row) => {
+      const cells = row
+        .split('</td>')
+        .slice(0, 4)
+        .map((cell) => cell.slice(cell.indexOf('>') + 1).trim());
+      const [page, errors, warnings, total] = cells;
+      return {
+        // The sparse badge is markup inside the first cell; the URL is what precedes it.
+        page: page.split('<')[0],
+        badged: page.includes('<span'),
+        errors: Number(errors),
+        warnings: Number(warnings),
+        total: Number(total),
+      };
+    });
+};
+
+test('every page read gets a row, including the ones with nothing wrong', () => {
+  const summary = multi([
+    ['example.ru/a.html', DIRTY],
+    ['example.ru/b.html', CLEAN],
+  ]);
+  const html = renderReport(summary, {
+    ...OPTIONS,
+    fetched: [
+      { url: 'https://example.ru/a', file: 'example.ru/a.html', sparse: false },
+      { url: 'https://example.ru/b', file: 'example.ru/b.html', sparse: false },
+    ],
+  });
+  const rows = pageRows(html);
+  assert.deepEqual(
+    rows.map((r) => r.page),
+    ['https://example.ru/a', 'https://example.ru/b'],
+    'a page with no findings is still evidence of what was covered',
+  );
+  assert.ok(rows[0].errors > 0);
+  assert.equal(rows[1].total, 0);
+});
+
+test('the per-page counts add up to the headline counts', () => {
+  const summary = multi([
+    ['example.ru/a.html', DIRTY],
+    ['example.ru/b.html', DIRTY],
+    ['example.ru/c.html', CLEAN],
+  ]);
+  const html = renderReport(summary, {
+    ...OPTIONS,
+    fetched: ['a', 'b', 'c'].map((n) => ({
+      url: `https://example.ru/${n}`,
+      file: `example.ru/${n}.html`,
+      sparse: false,
+    })),
+  });
+  const rows = pageRows(html);
+  const sum = (k) => rows.reduce((n, r) => n + r[k], 0);
+  assert.equal(sum('errors'), summary.totals.errors);
+  assert.equal(sum('warnings'), summary.totals.warnings);
+  assert.equal(sum('total'), summary.totals.violations);
+});
+
+test('the worst page is first, because the list is also the order of work', () => {
+  const summary = multi([
+    ['example.ru/quiet.html', CLEAN],
+    ['example.ru/loud.html', DIRTY],
+  ]);
+  const html = renderReport(summary, {
+    ...OPTIONS,
+    fetched: [
+      { url: 'https://example.ru/quiet', file: 'example.ru/quiet.html', sparse: false },
+      { url: 'https://example.ru/loud', file: 'example.ru/loud.html', sparse: false },
+    ],
+  });
+  assert.equal(pageRows(html)[0].page, 'https://example.ru/loud');
+});
+
+test('a page assembled in the browser is marked, so its zero is not read as clean', () => {
+  const summary = multi([['example.ru/app.html', SHELL]]);
+  const html = renderReport(summary, {
+    ...OPTIONS,
+    fetched: [{ url: 'https://example.ru/app', file: 'example.ru/app.html', sparse: true }],
+  });
+  assert.match(html, /arrived nearly empty/);
+  const rows = pageRows(html);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].badged, true, 'the shell page carries the badge');
+  // The count is not suppressed — it is qualified. Whatever number sits there describes
+  // the shell the server sent, and the note under the table says so.
+  assert.ok(rows[0].total >= 0);
+
+  // And the caveat is absent when it does not apply, so it keeps its meaning.
+  const solid = renderReport(multi([['example.ru/a.html', DIRTY]]), {
+    ...OPTIONS,
+    fetched: [{ url: 'https://example.ru/a', file: 'example.ru/a.html', sparse: false }],
+  });
+  assert.ok(!solid.includes('arrived nearly empty'));
+});
+
+test('the HTTP caveat states the count instead of listing every URL in one paragraph', () => {
+  const summary = multi([['example.ru/a.html', DIRTY]]);
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    url: `https://example.ru/p${i}`,
+    file: `example.ru/p${i}.html`,
+    sparse: false,
+  }));
+  const html = renderReport(summary, { ...OPTIONS, fetched: many });
+  const note = html.slice(html.indexOf('<div class="note">'), html.indexOf('Pages checked'));
+  assert.match(note, /40 pages, listed below|40 pages/);
+  assert.ok(
+    !note.includes('https://example.ru/p39'),
+    'the caveat should not be a wall of forty URLs; the table below is where they belong',
+  );
+});
+
+test('a scan with no fetched pages has no page table at all', () => {
+  const html = renderReport(summaryFor('src/App.tsx', DIRTY), OPTIONS);
+  assert.ok(!html.includes('Pages checked'));
+});

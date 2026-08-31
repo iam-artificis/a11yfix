@@ -863,7 +863,11 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
   if (opts.report !== undefined) {
     const html = renderReport(summary, {
       subject: reportSubject(opts.paths),
-      fetched: (opts.fetched ?? []).map((f) => f.url),
+      fetched: (opts.fetched ?? []).map((f) => ({
+        url: f.url,
+        file: f.file,
+        sparse: f.sparse,
+      })),
       generatedAt: new Date().toISOString(),
       level: opts.level,
       toolVersion: VERSION,

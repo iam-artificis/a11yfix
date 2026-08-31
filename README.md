@@ -238,6 +238,26 @@ Encodings are honoured, including windows-1251, which is still in use on the sit
 mode exists for — a page decoded as the wrong charset would have every text rule
 reporting on mojibake.
 
+### A whole site, from its own sitemap
+
+```bash
+npx a11yfix --sitemap https://example.ru/sitemap.xml --report audit.html --lang ru
+```
+
+Fifty pages by default, one at a time with a pause between them; `--max-files` moves the
+cap. A sitemap index is followed one level down.
+
+The fifty are spread evenly across the list rather than taken from the front of it. A
+sitemap comes out in whatever order the CMS emitted it, which is usually oldest section
+first: on one museum site the first twelve entries include `1script.php`, `script.php` and
+`test.php`. Reading the front of the list produces an audit of one corner of the site and
+calls it an audit of the site. The report says what it sampled and from how many, and the
+front page is always read even when the sitemap forgets to list it.
+
+The report then opens with every page it read, worst first — which is the coverage the
+reader is owed and, incidentally, the order to work through. A page assembled in the
+browser is marked as one, so its low count is not mistaken for a good one.
+
 ## Configuration
 
 `.a11yfixrc.json` in the project root, or an `a11yfix` key in `package.json`. A

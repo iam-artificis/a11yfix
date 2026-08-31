@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { fetchPage, isUrl } from '../dist/fetch.js';
+import { fetchPage, fetchSitemap, isUrl, spread } from '../dist/fetch.js';
 
 /**
  * Reading a live URL is the mode that decides whether a stranger can ask a question at
@@ -304,6 +304,172 @@ test('an oversized response is refused on the declared length, not after reading
     },
     async (base) => {
       await assert.rejects(() => fetchPage(base), /exceeds the .* limit/);
+    },
+  );
+});
+
+
+/**
+ * Which pages a site audit reads.
+ *
+ * A sitemap comes out in whatever order the CMS emitted it, and on the sites this tool is
+ * aimed at that is oldest-section-first. Reading the first fifty of four thousand gave an
+ * audit of one section: on shm.ru the first twelve entries include `1script.php`,
+ * `script.php` and `test.php`, three of which serve nothing a visitor ever sees. A
+ * stride across the whole list costs the same fifty requests and describes the site.
+ */
+
+const sitemapOf = (urls) =>
+  '<?xml version="1.0" encoding="UTF-8"?><urlset>' +
+  urls.map((u) => `<url><loc>${u}</loc></url>`).join('') +
+  '</urlset>';
+
+test('spread reaches both ends of the list, not just the front of it', () => {
+  const pool = Array.from({ length: 100 }, (_, i) => `p${i}`);
+  const picked = spread(pool, 5);
+  assert.equal(picked.length, 5);
+  assert.equal(picked[0], 'p0');
+  assert.equal(picked[4], 'p99', 'the last section of a sitemap is part of the site');
+  assert.deepEqual(picked, ['p0', 'p25', 'p50', 'p74', 'p99']);
+});
+
+test('spread returns the number of pages it was asked for, even when rounding collides', () => {
+  // A pool barely larger than the limit makes the stride about 1, where naive rounding
+  // lands on the same index twice and silently returns a shorter audit than was paid for.
+  for (const n of [51, 52, 53, 60, 99]) {
+    const pool = Array.from({ length: n }, (_, i) => `p${i}`);
+    const picked = spread(pool, 50);
+    assert.equal(picked.length, 50, `pool of ${n}`);
+    assert.equal(new Set(picked).size, 50, `pool of ${n}: no page read twice`);
+  }
+});
+
+test('spread leaves a list shorter than the limit alone', () => {
+  assert.deepEqual(spread(['a', 'b'], 50), ['a', 'b']);
+  assert.deepEqual(spread([], 50), []);
+  assert.deepEqual(spread(['a', 'b', 'c'], 1), ['a']);
+});
+
+test('a sitemap is sampled across the whole site and says so', async () => {
+  await withServer(
+    (req, res) => {
+      if (req.url === '/sitemap.xml') {
+        const urls = ['/', ...Array.from({ length: 199 }, (_, i) => `/page-${i}/`)];
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        res.end(sitemapOf(urls.map((u) => `http://127.0.0.1:${res.socket.localPort}${u}`)));
+        return;
+      }
+      res.writeHead(404).end();
+    },
+    async (base) => {
+      const r = await fetchSitemap(`${base}/sitemap.xml`, 10);
+      assert.equal(r.urls.length, 10);
+      assert.equal(r.listed, 200);
+      assert.ok(r.urls.includes(`${base}/`), 'the front page is read');
+      assert.ok(
+        r.urls.some((u) => u.includes('page-198')),
+        'and so is the far end of the list',
+      );
+      assert.ok(
+        r.notes.some((n) => n.includes('200') && n.includes('spread evenly')),
+        'the sampling is stated, not silent: ' + JSON.stringify(r.notes),
+      );
+    },
+  );
+});
+
+test('a sitemap smaller than the cap is read whole, and the front page is added to it', async () => {
+  await withServer(
+    (req, res) => {
+      res.writeHead(200, { 'content-type': 'application/xml' });
+      res.end(
+        sitemapOf([
+          `http://127.0.0.1:${res.socket.localPort}/a/`,
+          `http://127.0.0.1:${res.socket.localPort}/b/`,
+        ]),
+      );
+    },
+    async (base) => {
+      const r = await fetchSitemap(`${base}/sitemap.xml`, 50);
+      assert.deepEqual(r.urls, [`${base}/`, `${base}/a/`, `${base}/b/`]);
+      assert.equal(r.listed, 2, 'the added front page is not counted as something listed');
+      assert.deepEqual(r.notes, ['the sitemap does not list the front page; read anyway']);
+    },
+  );
+});
+
+test('a sitemap index is followed, and the sample spans its children', async () => {
+  await withServer(
+    (req, res) => {
+      const origin = `http://127.0.0.1:${res.socket.localPort}`;
+      res.writeHead(200, { 'content-type': 'application/xml' });
+      if (req.url === '/sitemap.xml') {
+        res.end(
+          '<?xml version="1.0"?><sitemapindex>' +
+            ['one', 'two', 'three']
+              .map((n) => `<sitemap><loc>${origin}/sm-${n}.xml</loc></sitemap>`)
+              .join('') +
+            '</sitemapindex>',
+        );
+        return;
+      }
+      const name = (req.url ?? '').replace('/sm-', '').replace('.xml', '');
+      res.end(
+        sitemapOf(Array.from({ length: 20 }, (_, i) => `${origin}/${name}/${i}/`)),
+      );
+    },
+    async (base) => {
+      const r = await fetchSitemap(`${base}/sitemap.xml`, 6);
+      assert.equal(r.listed, 60);
+      assert.equal(r.urls.length, 6);
+      for (const child of ['one', 'two', 'three']) {
+        assert.ok(
+          r.urls.some((u) => u.includes(`/${child}/`)),
+          `nothing from ${child}: the sample missed a third of the site`,
+        );
+      }
+    },
+  );
+});
+
+test('documents in a sitemap are dropped before anything is requested', async () => {
+  await withServer(
+    (req, res) => {
+      const origin = `http://127.0.0.1:${res.socket.localPort}`;
+      res.writeHead(200, { 'content-type': 'application/xml' });
+      res.end(
+        sitemapOf([
+          `${origin}/report.pdf`,
+          `${origin}/photo.JPG`,
+          `${origin}/real/`,
+          'https://other-host.example/page/',
+        ]),
+      );
+    },
+    async (base) => {
+      const r = await fetchSitemap(`${base}/sitemap.xml`, 50);
+      assert.deepEqual(r.urls, [`${base}/`, `${base}/real/`]);
+    },
+  );
+});
+
+test('a front page listed in the middle of the sitemap is still read', async () => {
+  await withServer(
+    (req, res) => {
+      const origin = `http://127.0.0.1:${res.socket.localPort}`;
+      const urls = Array.from({ length: 100 }, (_, i) => `${origin}/p${i}/`);
+      urls[50] = `${origin}/`;
+      res.writeHead(200, { 'content-type': 'application/xml' });
+      res.end(sitemapOf(urls));
+    },
+    async (base) => {
+      const r = await fetchSitemap(`${base}/sitemap.xml`, 4);
+      assert.ok(r.urls.includes(`${base}/`));
+      assert.equal(r.urls.length, 4, 'and the cap is still the cap');
+      assert.ok(
+        !r.notes.some((n) => n.includes('does not list the front page')),
+        'it was listed, so nothing is claimed about it being missing',
+      );
     },
   );
 });

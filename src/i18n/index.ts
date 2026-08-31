@@ -88,10 +88,24 @@ const EN_UI: UiStrings = {
     'behaviour, screen-reader announcements, error recovery and anything that depends on ' +
     'how the page behaves in a browser are outside what any source analyser can see. ' +
     'Those need a person, and this report does not stand in for one.',
-  fetchedNote: (urls) =>
-    `This was read over HTTP from ${urls}, not from a project's source files. No script ` +
-    'was run, so anything the page builds in the browser was not part of what was ' +
-    'checked, and no patch is offered: there is no file here to change.',
+  fetchedNote: (pages) =>
+    `This was read over HTTP — ${pluralEn(pages, 'page')}, listed below — and not from a ` +
+    "project's source files. No script was run, so anything the page builds in the " +
+    'browser was not part of what was checked, and no patch is offered: there is no file ' +
+    'here to change.',
+  pagesHeading: 'Pages checked',
+  pagesIntro:
+    'Every page this run read, worst first, so the list doubles as where to start. A page ' +
+    'with no findings is a page where nothing this tool checks went wrong — not a page ' +
+    'that is accessible.',
+  colPage: 'Page',
+  colErrors: 'Errors',
+  colWarnings: 'Warnings',
+  pageSparse: 'assembled in the browser',
+  pagesSparseNote:
+    'Rows marked “assembled in the browser” arrived nearly empty: the server sends a shell ' +
+    'and the browser builds the rest. No script was run, so those counts describe the ' +
+    'shell and say nothing about the page a visitor sees.',
   byCriterion: 'By success criterion',
   byCriterionIntro:
     'The same findings, grouped by the part of WCAG 2.2 they fall under. Each criterion ' +

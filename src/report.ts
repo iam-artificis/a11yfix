@@ -29,6 +29,15 @@ import { strings } from './i18n/index.js';
  * emailed, opened offline, and printed.
  */
 
+/** One page read over HTTP, as the report needs to describe it. */
+export interface ScannedPage {
+  readonly url: string;
+  /** The name findings from this page are filed under, so rows can be matched to them. */
+  readonly file: string;
+  /** The served HTML was nearly empty: the page is assembled in the browser. */
+  readonly sparse: boolean;
+}
+
 export interface ReportOptions {
   /** What was scanned: a project name, a directory, a URL. */
   readonly subject: string;
@@ -44,8 +53,15 @@ export interface ReportOptions {
   readonly includeInfo?: boolean;
   /** Command that produced this, printed so the reader can reproduce it. */
   readonly command?: string;
-  /** URLs this run read over HTTP, if it read any. Changes what a clean result means. */
-  readonly fetched?: readonly string[];
+  /**
+   * The pages this run read over HTTP, if it read any.
+   *
+   * Two things depend on this. It changes what a clean result means — no script ran, so
+   * the absence of a finding is the absence of a finding *in what the server sent*. And
+   * it is the only place the reader can see what was actually covered: a whole-site audit
+   * that does not say which pages it read is an invitation to assume it read all of them.
+   */
+  readonly fetched?: readonly ScannedPage[];
   /**
    * Language of the report. Defaults to English.
    *
@@ -172,7 +188,8 @@ p { margin: 0 0 1rem; }
 table { border-collapse: collapse; width: 100%; font-size: .92rem; margin: 0 0 1rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.path { word-break: break-all; }
 .rule { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 1.25rem; overflow: hidden; break-inside: avoid; }
 .rule > .head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); }
 .rule.error > .head { background: var(--error-bg); }
@@ -292,9 +309,60 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   // caveatBody2 carries <code> tags, which are ours rather than the scanned source's.
   w(`<p>${t.ui.caveatBody2}</p>`);
   if (options.fetched !== undefined && options.fetched.length > 0) {
-    w(`<p><strong>${escapeHtml(t.ui.fetchedNote(options.fetched.join(', ')))}</strong></p>`);
+    w(`<p><strong>${escapeHtml(t.ui.fetchedNote(options.fetched.length))}</strong></p>`);
   }
   w('</div>');
+
+  if (options.fetched !== undefined && options.fetched.length > 0) {
+    // Counted from every violation, not from the ones shown: a page whose only findings
+    // are info-severity has not been checked less than its neighbours, and showing it as
+    // a zero next to a page with one warning would misdirect whoever reads this to decide
+    // where to spend a week.
+    const byFile = new Map<string, { errors: number; warnings: number; total: number }>();
+    for (const f of summary.files) {
+      const row = { errors: 0, warnings: 0, total: f.violations.length };
+      for (const v of f.violations) {
+        if (v.severity === 'error') row.errors++;
+        else if (v.severity === 'warning') row.warnings++;
+      }
+      byFile.set(f.file, row);
+    }
+    const rows = options.fetched.map((page) => ({
+      page,
+      counts: byFile.get(page.file) ?? { errors: 0, warnings: 0, total: 0 },
+    }));
+    rows.sort(
+      (a, b) =>
+        b.counts.errors - a.counts.errors ||
+        b.counts.warnings - a.counts.warnings ||
+        b.counts.total - a.counts.total ||
+        (a.page.url < b.page.url ? -1 : 1),
+    );
+
+    w(`<h2>${escapeHtml(t.ui.pagesHeading)}</h2>`);
+    w(`<p>${escapeHtml(t.ui.pagesIntro)}</p>`);
+    w(
+      '<table><thead><tr>' +
+        `<th>${escapeHtml(t.ui.colPage)}</th>` +
+        `<th class="num">${escapeHtml(t.ui.colErrors)}</th>` +
+        `<th class="num">${escapeHtml(t.ui.colWarnings)}</th>` +
+        `<th class="num">${escapeHtml(t.ui.colFindings)}</th>` +
+        '</tr></thead><tbody>',
+    );
+    for (const r of rows) {
+      const mark = r.page.sparse
+        ? ` <span class="tag warning">${escapeHtml(t.ui.pageSparse)}</span>`
+        : '';
+      w(
+        `<tr><td class="path">${escapeHtml(r.page.url)}${mark}</td>` +
+          `<td class="num">${r.counts.errors}</td>` +
+          `<td class="num">${r.counts.warnings}</td>` +
+          `<td class="num">${r.counts.total}</td></tr>`,
+      );
+    }
+    w('</tbody></table>');
+    if (rows.some((r) => r.page.sparse)) w(`<p class="sub">${escapeHtml(t.ui.pagesSparseNote)}</p>`);
+  }
 
   if (criterionRows.length > 0) {
     w(`<h2>${escapeHtml(t.ui.byCriterion)}</h2>`);

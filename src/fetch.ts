@@ -265,6 +265,40 @@ const NOT_A_PAGE =
 export interface SitemapResult {
   readonly urls: readonly string[];
   readonly notes: readonly string[];
+  /** How many pages the sitemap offered, before the cap. */
+  readonly listed: number;
+}
+
+/**
+ * How many candidates to gather before choosing which to read.
+ *
+ * A sitemap is written in whatever order the CMS emitted it, which on Bitrix means the
+ * oldest section first. Taking the first fifty of four thousand gave a scan of one
+ * section — on shm.ru literally `1script.php`, `script.php` and `test.php` — and called
+ * it an audit of the site. Gathering a pool and stepping through it evenly costs a few
+ * more requests for the sitemap files themselves and produces a sample that is actually
+ * about the site.
+ */
+const POOL_FACTOR = 20;
+
+/**
+ * Pick `limit` items spread evenly across `pool`, keeping its order.
+ *
+ * Both ends are included, so the sample reaches the sections a CMS puts last as well as
+ * the ones it puts first.
+ */
+export function spread(pool: readonly string[], limit: number): string[] {
+  if (limit <= 0) return [];
+  if (pool.length <= limit) return [...pool];
+  if (limit === 1) return [pool[0] as string];
+  const chosen = new Set<number>();
+  for (let i = 0; i < limit; i++) {
+    chosen.add(Math.round((i * (pool.length - 1)) / (limit - 1)));
+  }
+  // Rounding can land twice on one index. Top up from whatever is still unused rather
+  // than returning fewer pages than were asked for.
+  for (let i = 0; chosen.size < limit && i < pool.length; i++) chosen.add(i);
+  return [...chosen].sort((a, b) => a - b).map((i) => pool[i] as string);
 }
 
 function gunzipIfNeeded(bytes: Uint8Array, text: string): string {
@@ -323,9 +357,8 @@ export async function fetchSitemap(input: string, limit: number): Promise<Sitema
   const isIndex = /<sitemapindex[\s>]/i.test(xml);
 
   const seen = new Set<string>();
-  const urls: string[] = [];
+  const pool: string[] = [];
   const take = (raw: string): void => {
-    if (urls.length >= limit) return;
     let u: URL;
     try {
       u = new URL(raw, root);
@@ -337,8 +370,9 @@ export async function fetchSitemap(input: string, limit: number): Promise<Sitema
     u.hash = '';
     if (seen.has(u.href)) return;
     seen.add(u.href);
-    urls.push(u.href);
+    pool.push(u.href);
   };
+  const poolTarget = Math.max(limit * POOL_FACTOR, limit);
 
   if (isIndex) {
     const children = locs(xml);
@@ -349,7 +383,7 @@ export async function fetchSitemap(input: string, limit: number): Promise<Sitema
     }
     let failed = 0;
     for (const child of children.slice(0, MAX_CHILD_SITEMAPS)) {
-      if (urls.length >= limit) break;
+      if (pool.length >= poolTarget) break;
       try {
         for (const loc of locs(await read(new URL(child, root).href))) take(loc);
       } catch {
@@ -361,10 +395,33 @@ export async function fetchSitemap(input: string, limit: number): Promise<Sitema
     for (const loc of locs(xml)) take(loc);
   }
 
-  if (urls.length === 0) {
+  if (pool.length === 0) {
     throw new Error(
       `${root.href} lists no pages. It may not be a sitemap, or every URL in it is on another host.`,
     );
   }
-  return { urls, notes };
+
+  // The front page is the one everybody judges the site by, and an even stride can step
+  // straight past it — or the sitemap can omit it, as shm.ru's does. Either way it is
+  // read: an audit of a site that skipped its own front door is a bad audit, and one
+  // request is not a cost worth weighing against that. When it is missing from the list,
+  // a slot is reserved for it rather than taken from the sample after the fact.
+  const home = `${root.origin}/`;
+  const addHome = limit > 1 && !seen.has(home);
+  const urls = spread(pool, addHome ? limit - 1 : limit);
+  if (limit > 1 && !urls.includes(home)) {
+    if (addHome) {
+      urls.unshift(home);
+      notes.push('the sitemap does not list the front page; read anyway');
+    } else {
+      // Listed, but the stride landed either side of it. One sampled page gives way.
+      urls.splice(0, 1, home);
+    }
+  }
+  if (pool.length > urls.length) {
+    notes.push(
+      `sitemap lists ${pool.length} pages; reading ${urls.length}, spread evenly across the list`,
+    );
+  }
+  return { urls, notes, listed: pool.length };
 }

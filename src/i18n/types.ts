@@ -38,7 +38,21 @@ export interface UiStrings {
    * of a finding means: no script ran, so anything the browser would have built is not
    * in what was checked.
    */
-  fetchedNote(urls: string): string;
+  fetchedNote(pages: number): string;
+  /** Heading of the table listing every page a URL scan read. */
+  readonly pagesHeading: string;
+  readonly pagesIntro: string;
+  readonly colPage: string;
+  readonly colErrors: string;
+  readonly colWarnings: string;
+  /**
+   * Badge on a page whose served HTML was nearly empty.
+   *
+   * Without it, a page assembled in the browser shows a reassuring zero next to it, which
+   * is the one number in this report that would be a lie.
+   */
+  readonly pageSparse: string;
+  readonly pagesSparseNote: string;
   readonly byCriterion: string;
   readonly byCriterionIntro: string;
   /**
