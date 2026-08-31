@@ -783,18 +783,77 @@ export function hasAttr(el: Element, name: string): boolean {
 export function textOf(el: Element): string {
   return (
     decodeReferences(
-      el.innerSource
-        // Script and style bodies are not visible text; leaving them in would let a
-        // stylesheet or a click handler masquerade as an element's accessible name.
-        .replace(new RegExp("<(script|style)\\b[^>]*>[\\s\\S]*?</\\1>", 'gi'), ' ')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\{[^}]*\}/g, ' '),
+      stripTags(
+        el.innerSource
+          // Script and style bodies are not visible text; leaving them in would let a
+          // stylesheet or a click handler masquerade as an element's accessible name.
+          .replace(new RegExp("<(script|style)\\b[^>]*>[\\s\\S]*?</\\1>", 'gi'), ' '),
+      ).replace(/\{[^}]*\}/g, ' '),
       // Decoded after the tags come out, never before: `&lt;div&gt;` would otherwise
       // become `<div>` and be stripped as markup the author never wrote.
     )
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+/**
+ * Remove tags, ending each one at the `>` that really closes it.
+ *
+ * This was `/<[^>]*>/g`, which ends a tag at the first `>` in the source — including one
+ * inside a quoted attribute value. tzar.ru serves
+ *
+ *     <div data-text=":<br /> - " data-x="" onclick="MapObjectClick(event,3);">
+ *
+ * and the regex cut at the `>` of `<br />`, so everything after it — `data-x=""`,
+ * `onclick="MapObjectClick(event,3);"` — came back as the element's *text*. That decides
+ * whether a link is reported as having no discernible name, so an element with no text
+ * at all can look like it has plenty, and an excerpt printed for a client can contain a
+ * click handler where a caption should be.
+ *
+ * A bare `<` that does not begin a tag is left alone: `a < b` in prose is text, and
+ * blanking from there to the next `>` would delete a sentence.
+ */
+function stripTags(src: string): string {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt < 0) {
+      out += src.slice(i);
+      break;
+    }
+    out += src.slice(i, lt);
+    const next = src[lt + 1];
+    if (next === undefined || !(NAME_START.test(next) || next === '/' || next === '!' || next === '?')) {
+      out += '<';
+      i = lt + 1;
+      continue;
+    }
+    if (src.startsWith('<!--', lt)) {
+      const close = src.indexOf('-->', lt + 4);
+      out += ' ';
+      i = close < 0 ? src.length : close + 3;
+      continue;
+    }
+    let k = lt + 1;
+    let quote: string | null = null;
+    while (k < src.length) {
+      const ch = src[k] as string;
+      if (quote !== null) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        k++;
+        break;
+      }
+      k++;
+    }
+    out += ' ';
+    i = k;
+  }
+  return out;
 }
 
 /**

@@ -330,3 +330,88 @@ test('a stylesheet selector is not an explanation anybody can read', () => {
     'the * = in a CSS attribute selector must not count as a legend',
   );
 });
+
+
+/**
+ * A link is named by the image inside it.
+ *
+ * `<a href="…"><img alt="Алмазная колесница"></a>` is named by that alt — that is the
+ * accessible name computation, and it is how the front page of nearly every museum in
+ * the corpus names its slider links. Reading only the text made all of them nameless, so
+ * every rule that needs a name to say anything fell silent on exactly those links.
+ */
+
+const linkFindings = (body) =>
+  analyseSource(
+    'page.html',
+    `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Тест</title></head>` +
+      `<body><main><h1>Заголовок</h1>${body}</main></body></html>`,
+    { rules: ALL_RULES, level: 'AA', fixThreshold: null },
+  ).violations;
+
+test('a link whose only content is an image takes the image name', () => {
+  const found = linkFindings(
+    '<a href="/a/" target="_blank"><img src="a.jpg" alt="Алмазная колесница"></a>',
+  );
+  const newWindow = found.filter((v) => v.ruleId === 'A11Y-LINK-005');
+  assert.equal(newWindow.length, 1, 'the link has a name, and that name says nothing about a new tab');
+  assert.match(newWindow[0].message, /Алмазная колесница/);
+  assert.equal(
+    found.filter((v) => v.ruleId === 'A11Y-LINK-001').length,
+    0,
+    'and it is not also reported as having no name at all',
+  );
+});
+
+test('two image links with one alt and two destinations are ambiguous', () => {
+  // meloman.ru serves thirty-one of these: «Изображение слайдера» thirty-one times, to
+  // thirty-one different concerts. Someone listening to a list of links hears one phrase.
+  const found = linkFindings(
+    '<a href="/a/"><img src="a.jpg" alt="Изображение слайдера"></a>' +
+      '<a href="/b/"><img src="b.jpg" alt="Изображение слайдера"></a>',
+  );
+  assert.ok(found.some((v) => v.ruleId === 'A11Y-LINK-006'));
+});
+
+test('an image whose alt is an expression makes the name unreadable, not absent', () => {
+  const found = analyseSource(
+    'page.jsx',
+    '<a href="/a/" target="_blank"><img src="a.jpg" alt={caption} /></a>',
+    { rules: ALL_RULES, level: 'AA', fixThreshold: null },
+  ).violations;
+  assert.equal(
+    found.filter((v) => v.ruleId === 'A11Y-LINK-005' || v.ruleId === 'A11Y-LINK-001').length,
+    0,
+    'a finding about a name we could not read is the one kind that must not be produced',
+  );
+});
+
+test('a link hidden from assistive technology is not judged on its name', () => {
+  // mxat.ru puts a decorative duplicate beside every visible show link: aria-hidden and
+  // out of the tab order, correct as written. A11Y-KBD-004 covers the case that is not.
+  for (const attrs of [
+    'aria-hidden="true" tabindex="-1" target="_blank"',
+    'hidden target="_blank"',
+  ]) {
+    const found = linkFindings(`<a href="/a/" ${attrs}><img src="a.jpg" alt="Школа"></a>`);
+    assert.equal(
+      found.filter((v) => v.ruleId.startsWith('A11Y-LINK-00')).filter((v) => v.ruleId !== 'A11Y-LINK-004').length,
+      0,
+      `${attrs} should silence the naming rules`,
+    );
+  }
+});
+
+test('an aria-hidden ancestor hides the link inside it', () => {
+  const found = linkFindings(
+    '<div aria-hidden="true"><a href="/a/" target="_blank"><img src="a.jpg" alt="Школа"></a></div>',
+  );
+  assert.equal(found.filter((v) => v.ruleId === 'A11Y-LINK-005').length, 0);
+});
+
+test('aria-hidden="false" does not hide anything', () => {
+  const found = linkFindings(
+    '<a href="/a/" aria-hidden="false" target="_blank"><img src="a.jpg" alt="Школа"></a>',
+  );
+  assert.equal(found.filter((v) => v.ruleId === 'A11Y-LINK-005').length, 1);
+});

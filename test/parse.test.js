@@ -515,3 +515,36 @@ test('the group stack still balances when layers nest', () => {
   assert.ok(y !== undefined, 'a rule after two closed layers is still found');
   assert.deepEqual(y.conditions, []);
 });
+
+
+/**
+ * A tag ends at the `>` that closes it, not at the first one in the source.
+ *
+ * `textOf` stripped tags with /<[^>]*>/g, so a `>` inside a quoted attribute value ended
+ * the tag early and everything after it came back as the element's *text*. That decides
+ * whether a link is reported as having no name, and it put a click handler into a report
+ * where a caption should have been.
+ */
+
+test('a > inside an attribute value does not end the tag', () => {
+  const source = '<a href="/x/"><img alt="Алмазная колесница.<br>Буддийское искусство" src="a.jpg"></a>';
+  const { elements } = parse(source);
+  const link = elements.find((e) => e.tagLower === 'a');
+  assert.equal(textOf(link), '', 'the link has no text of its own; the alt is not text');
+});
+
+test('a comment inside an element is not that element text', () => {
+  // alexandrinsky.ru wraps a commented-out "Подробнее" link inside a live one. The old
+  // stripper cut at the > of the commented <a> tag and handed back "Подробнее -->" as the
+  // outer link's name — which was then reported as uninformative link text, four times.
+  const source = '<a href="/x/"><!--\t<a style="color:;" href="">Подробнее</a> --><img src="a.jpg"></a>';
+  const { elements } = parse(source);
+  const link = elements.find((e) => e.tagLower === 'a');
+  assert.equal(textOf(link), '');
+});
+
+test('a bare < in prose is text, not the start of a tag', () => {
+  const { elements } = parse('<p>Если a < b, то так</p>');
+  const p = elements.find((e) => e.tagLower === 'p');
+  assert.match(textOf(p), /Если a < b, то так/);
+});

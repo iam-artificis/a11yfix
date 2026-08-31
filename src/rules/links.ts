@@ -128,7 +128,72 @@ function nameOf(el: Element): LinkName {
     return { text: label.value.trim(), opaque: false };
   }
   if (hasOpaqueContent(el)) return { text: '', opaque: true };
-  return { text: textOf(el), opaque: false };
+  const text = textOf(el);
+  if (text.trim() !== '') return { text, opaque: false };
+  return imageName(el);
+}
+
+/**
+ * The name a link takes from the image inside it, when it has no text of its own.
+ *
+ * `<a href="…"><img alt="Алмазная колесница"></a>` is named by that alt — that is the
+ * accessible name computation, and it is how half the front pages in the corpus name
+ * their slider links. Reading only `textOf` made every one of them nameless, so the rules
+ * that need a name to say anything — generic text, unannounced new window, two links with
+ * one name — all fell silent on exactly the links a museum's front page is made of.
+ *
+ * This surfaced only after the tag stripper was fixed: an `alt` containing `<br>` used to
+ * leak half of itself out of the tag and back into the link as text, which hid the gap by
+ * accident and put `Буддийское искусство России"&gt;` into a report as a link's name.
+ *
+ * An image whose alt is an expression makes the name opaque rather than absent: we cannot
+ * read it, and reporting a link as unnamed because we could not read its name is the
+ * failure this whole file is written to avoid.
+ */
+function imageName(el: Element): LinkName {
+  const parts: string[] = [];
+  let opaque = false;
+  walk(el, (child) => {
+    if (child.tagLower !== 'img') return;
+    const alt = readAttr(child, 'alt');
+    if (!alt.present) return;
+    if (alt.dynamic) {
+      opaque = true;
+      return;
+    }
+    const value = alt.value.trim();
+    if (value !== '') parts.push(value);
+  });
+  if (opaque) return { text: '', opaque: true };
+  return { text: parts.join(' '), opaque: false };
+}
+
+/**
+ * True when nothing announces this element, because it or an ancestor is out of the
+ * accessibility tree.
+ *
+ * A rule about an accessible name has nothing to say about an element that has no
+ * accessible presence. mxat.ru carries slider links written
+ *
+ *     <a aria-hidden="true" tabindex="-1" target="_blank" href="…"><img alt="…"></a>
+ *
+ * beside the visible text link to the same show: hidden from a screen reader, removed
+ * from the tab order, decorative by construction and correct as written. Telling that
+ * link it fails to announce its new window is telling the author to fix something that
+ * is not broken. A11Y-KBD-004 already covers the case that *is* broken — aria-hidden on
+ * something a keyboard can still reach.
+ *
+ * An expression stays quiet, as it does everywhere else in this file: `aria-hidden={x}`
+ * could be either, and a finding about markup we could not read is the one kind of
+ * finding this tool must not produce.
+ */
+function hiddenFromAT(el: Element): boolean {
+  for (let node: Element | null = el; node !== null; node = node.parent) {
+    const a = readAttr(node, 'aria-hidden');
+    if (a.present && (a.dynamic || a.value.trim().toLowerCase() !== 'false')) return true;
+    if (hasAttr(node, 'hidden')) return true;
+  }
+  return false;
 }
 
 /** Strip accents and surrounding punctuation so `Read more »` matches `read more`. */
@@ -366,6 +431,7 @@ const emptyLink: Rule = {
       if (!isAnchor(el, jsx)) continue;
       // Without href this is a legacy named anchor, not a control: it needs no name.
       if (!readBindable(el, 'href').present) continue;
+      if (hiddenFromAT(el)) continue;
 
       const name = nameOf(el);
       if (name.opaque || name.text.trim() !== '') continue;
@@ -526,6 +592,7 @@ const genericLinkText: Rule = {
     for (const el of ctx.markup.elements) {
       if (!isAnchor(el, jsx)) continue;
       if (!readBindable(el, 'href').present) continue;
+      if (hiddenFromAT(el)) continue;
 
       const name = nameOf(el);
       if (name.opaque) continue;
@@ -829,6 +896,7 @@ const unannouncedNewWindow: Rule = {
       if (target.value.trim().toLowerCase() !== '_blank') continue;
       // A description may already carry the warning; assume the author meant it to.
       if (hasAttr(el, 'aria-describedby')) continue;
+      if (hiddenFromAT(el)) continue;
 
       const name = nameOf(el);
       if (name.opaque) continue;
@@ -944,6 +1012,7 @@ const ambiguousLinkNames: Rule = {
       if (!href.present || href.dynamic) continue;
       const target = href.value.trim();
       if (target === '') continue;
+      if (hiddenFromAT(el)) continue;
 
       const name = nameOf(el);
       if (name.opaque) continue;
@@ -1120,6 +1189,12 @@ const brokenFragment: Rule = {
       if (fragment === '') continue; // href="#" belongs to A11Y-LINK-007
       if (fragment.startsWith('/') || fragment.startsWith('!')) continue; // hash-router path
       if (fragment.toLowerCase() === 'top') continue; // defined by the browser itself
+      // A11Y-KBD-009's patch writes href="#A11YFIX-TODO" onto an anchor with no destination,
+      // deliberately: the marker makes the element focusable and fails CI until a human
+      // supplies the real URL. A11Y-TODO-001 reports it, and says the right thing. Reporting
+      // it again here says the wrong one — "point the link at an element that exists" is not
+      // the repair; the destination is. Applying our own patch must not manufacture a finding.
+      if (fragment.includes(TODO_MARKER)) continue;
 
       let decoded = fragment;
       try {

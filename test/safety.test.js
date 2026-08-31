@@ -380,3 +380,32 @@ test('a report line never ends in half a character', () => {
     }
   }
 });
+
+test('a TODO marker in an href is not also reported as a broken fragment link', () => {
+  // A11Y-KBD-009 patches `<a onclick=…>` with href="#A11YFIX-TODO": the marker makes the
+  // element focusable and fails CI until a human writes the real destination. A11Y-TODO-001
+  // reports it and says exactly that. A11Y-LINK-008 used to report it a second time as
+  // "no element in this document has that id", whose repair — point it at an element that
+  // exists — is not the repair. Applying our own patch must not manufacture a finding.
+  const source =
+    `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Тест</title></head>` +
+    `<body><main><h1>Заголовок</h1><a onclick="open()">Подробнее</a></main></body></html>`;
+  const patched = analyseSource('page.html', source, {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: 'manual',
+    markTodos: true,
+  }).fixedSource;
+  assert.ok(patched.includes(`href="#${TODO_MARKER}"`), 'the patch should plant the marker');
+
+  const after = run('page.html', patched).violations;
+  assert.equal(
+    after.filter((v) => v.ruleId === 'A11Y-LINK-008').length,
+    0,
+    'the marker is not a broken fragment; it is an unfinished destination',
+  );
+  assert.ok(
+    after.some((v) => v.ruleId === 'A11Y-TODO-001'),
+    'and the marker is still reported, by the rule that owns it',
+  );
+});
