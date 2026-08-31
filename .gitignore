@@ -4,3 +4,6 @@ dist/
 .env
 .env.*
 *.tsbuildinfo
+a11yfix-0.1.0.tgz
+demo/report-ru.html
+demo/report.html

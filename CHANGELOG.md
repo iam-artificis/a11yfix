@@ -82,3 +82,12 @@ Four quadratic loops and two exponential regexes, all reachable from ordinary in
 fails on a change in complexity and not on a slow machine. Findings on all five corpora
 are byte-identical; `shadcn-ui/ui` went from 1.58s to 1.32s and `calcom/cal.com` from
 0.77s to 0.55s.
+
+The audit report can be produced in Russian: `--report audit.html --lang ru`. Only the
+report is translated — the terminal is read by whoever ran the command, the report by
+whoever commissioned the work, and in the market where ГОСТ Р 52872-2019 gets written
+into a procurement contract that second person may not read English at all. All 69 rules
+have Russian text and a test fails the build if one is added without it; a second test
+fails if any line the report writes about itself is left in English. Where a patch is
+offered, the change itself — `text-gray-400 → text-gray-600` — appears in both languages,
+because that is the line a reader checks against their own file.

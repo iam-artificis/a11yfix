@@ -1,7 +1,9 @@
-import type { Fix, RunSummary, Severity, Violation } from './types.js';
+import type { RunSummary, Severity, Violation } from './types.js';
 import { ALL_RULES } from './rules/index.js';
 import { CRITERIA, criterion, criterionUrl } from './wcag.js';
-import { countByFixClass, fixClass } from './fix/classify.js';
+import { countByFixClass } from './fix/classify.js';
+import type { Lang, Strings } from './i18n/index.js';
+import { strings } from './i18n/index.js';
 
 /**
  * A standalone HTML audit report.
@@ -42,6 +44,13 @@ export interface ReportOptions {
   readonly includeInfo?: boolean;
   /** Command that produced this, printed so the reader can reproduce it. */
   readonly command?: string;
+  /**
+   * Language of the report. Defaults to English.
+   *
+   * Only the report is translated; the terminal stays English. See src/i18n/index.ts for
+   * why, and for what the two languages do differently.
+   */
+  readonly lang?: Lang;
 }
 
 const ESCAPES: Record<string, string> = {
@@ -65,10 +74,6 @@ export function escapeHtml(value: string): string {
 
 const SEVERITY_ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
-}
-
 /** Findings for one rule, with the rule's own metadata attached. */
 interface RuleGroup {
   readonly ruleId: string;
@@ -79,7 +84,7 @@ interface RuleGroup {
   readonly violations: Violation[];
 }
 
-function group(violations: readonly Violation[]): RuleGroup[] {
+function group(violations: readonly Violation[], t: Strings): RuleGroup[] {
   const byRule = new Map<string, Violation[]>();
   for (const v of violations) {
     const list = byRule.get(v.ruleId);
@@ -94,8 +99,8 @@ function group(violations: readonly Violation[]): RuleGroup[] {
     const first = list[0] as Violation;
     groups.push({
       ruleId,
-      title: rule?.title ?? ruleId,
-      summary: rule?.summary ?? '',
+      title: t.ruleTitle(ruleId),
+      summary: t.ruleSummary(ruleId),
       severity: first.severity,
       wcag: rule?.wcag ?? first.wcag,
       violations: list.sort((a, b) =>
@@ -114,24 +119,8 @@ function group(violations: readonly Violation[]): RuleGroup[] {
   );
 }
 
-/** What each finding needs from a person, in the words a non-developer can act on. */
-function remedy(v: Violation): { readonly kind: string; readonly text: string } {
-  const kind = fixClass(v);
-  if (kind === 'automatic') {
-    return { kind: 'a11yfix can patch this', text: (v.fix as Fix).description };
-  }
-  if (kind === 'review') {
-    return { kind: 'patch ready, needs a look', text: (v.fix as Fix).description };
-  }
-  const fix = v.fix;
-  return {
-    kind: 'needs a person',
-    text:
-      fix === undefined
-        ? 'No safe automatic change exists for this one.'
-        : (fix.advisory ?? fix.description),
-  };
-}
+// What each finding needs from a person, in the words a non-developer can act on, lives
+// in src/i18n: it is one of the five things that differ between the two languages.
 
 const STYLE = `
 :root {
@@ -229,9 +218,10 @@ footer code { color: var(--ink); }
  */
 export function renderReport(summary: RunSummary, options: ReportOptions): string {
   const includeInfo = options.includeInfo ?? false;
+  const t = strings(options.lang ?? 'en');
   const all = summary.files.flatMap((f) => f.violations);
   const shown = includeInfo ? all : all.filter((v) => v.severity !== 'info');
-  const groups = group(shown);
+  const groups = group(shown, t);
 
   const errors = shown.filter((v) => v.severity === 'error').length;
   const warnings = shown.filter((v) => v.severity === 'warning').length;
@@ -258,67 +248,59 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   };
 
   w('<!doctype html>');
-  w(`<html lang="en"><head><meta charset="utf-8">`);
+  w(`<html lang="${t.htmlLang}"><head><meta charset="utf-8">`);
   w('<meta name="viewport" content="width=device-width, initial-scale=1">');
-  w(`<title>Accessibility audit — ${escapeHtml(options.subject)}</title>`);
+  w(`<title>${escapeHtml(t.ui.titlePrefix)} — ${escapeHtml(options.subject)}</title>`);
   w(`<style>${STYLE}</style>`);
   w('</head><body><div class="wrap">');
 
   w('<header>');
-  w(`<h1>Accessibility audit: ${escapeHtml(options.subject)}</h1>`);
+  w(`<h1>${escapeHtml(t.ui.subject(options.subject))}</h1>`);
   w(
-    `<p class="sub">${escapeHtml(date)} · WCAG 2.2 level ${escapeHtml(options.level)} · ` +
-      `${plural(summary.files.length, 'file')} scanned · a11yfix ${escapeHtml(options.toolVersion)}</p>`,
+    `<p class="sub">${escapeHtml(
+      t.ui.subline(date, options.level, summary.files.length, options.toolVersion),
+    )}</p>`,
   );
   w('</header>');
 
   w('<div class="cards">');
-  w(`<div class="card error"><div class="n">${errors}</div><div class="l">Errors</div></div>`);
-  w(
-    `<div class="card warning"><div class="n">${warnings}</div><div class="l">Warnings</div></div>`,
-  );
-  w(
-    `<div class="card"><div class="n">${automatable}</div><div class="l">Fixable by patch</div></div>`,
-  );
-  w(`<div class="card"><div class="n">${manual}</div><div class="l">Need a person</div></div>`);
+  const card = (n: number, label: string, cls = ''): string =>
+    `<div class="card ${cls}"><div class="n">${n}</div><div class="l">${escapeHtml(label)}</div></div>`;
+  w(card(errors, t.ui.cardErrors, 'error'));
+  w(card(warnings, t.ui.cardWarnings, 'warning'));
+  w(card(automatable, t.ui.cardFixable));
+  w(card(manual, t.ui.cardManual));
   w('</div>');
 
-  w('<h2>What this report is</h2>');
+  w(`<h2>${escapeHtml(t.ui.whatThisIs)}</h2>`);
   if (shown.length === 0) {
-    w(
-      '<p>Every check this tool can perform came back clean across ' +
-        `${plural(summary.files.length, 'file')}. That is a real result, and it is also a narrow one — read the next section before treating it as more than it is.</p>`,
-    );
+    w(`<p>${escapeHtml(t.ui.clean(summary.files.length))}</p>`);
   } else {
-    w(
-      `<p>${plural(shown.length, 'finding')} across ${plural(filesWithFindings, 'file')}. ` +
-        'Each one names the file, the line, and the exact source that triggered it, so every claim ' +
-        'below can be checked in under a minute. Nothing here is inferred from a screenshot or a score.</p>',
-    );
+    w(`<p>${escapeHtml(t.ui.found(shown.length, filesWithFindings))}</p>`);
   }
 
   w('<div class="note">');
   w(
-    '<p><strong>This is not a conformance statement, and a clean run would not be one either.</strong> ' +
-      `A11yFix reads source code. It checks ${CRITERIA.filter((c) => c.reach === 'partial').length} ` +
-      `of the ${CRITERIA.length} WCAG 2.2 A and AA success criteria, and none of them completely.</p>`,
+    `<p><strong>${escapeHtml(t.ui.caveatHead)}</strong> ` +
+      escapeHtml(
+        t.ui.caveatBody(CRITERIA.filter((c) => c.reach === 'partial').length, CRITERIA.length),
+      ) +
+      '</p>',
   );
-  w(
-    '<p>It can prove an image has no <code>alt</code> attribute. It cannot judge whether an ' +
-      '<code>alt</code> that is present describes the image. Keyboard order, focus behaviour, ' +
-      'screen-reader announcements, error recovery and anything that depends on how the page ' +
-      'behaves in a browser are outside what any source analyser can see. Those need a person, ' +
-      'and this report does not stand in for one.</p>',
-  );
+  // caveatBody2 carries <code> tags, which are ours rather than the scanned source's.
+  w(`<p>${t.ui.caveatBody2}</p>`);
   w('</div>');
 
   if (criterionRows.length > 0) {
-    w('<h2>By success criterion</h2>');
+    w(`<h2>${escapeHtml(t.ui.byCriterion)}</h2>`);
+    w(`<p>${escapeHtml(t.ui.byCriterionIntro)}</p>`);
     w(
-      '<p>The same findings, grouped by the part of WCAG 2.2 they fall under. Each criterion ' +
-        'links to the W3C’s own explanation.</p>',
+      '<table><thead><tr>' +
+        `<th>${escapeHtml(t.ui.colCriterion)}</th>` +
+        `<th>${escapeHtml(t.ui.colLevel)}</th>` +
+        `<th class="num">${escapeHtml(t.ui.colFindings)}</th>` +
+        '</tr></thead><tbody>',
     );
-    w('<table><thead><tr><th>Criterion</th><th>Level</th><th class="num">Findings</th></tr></thead><tbody>');
     for (const c of criterionRows) {
       w(
         `<tr><td><a href="${escapeHtml(criterionUrl(c.sc))}">${escapeHtml(c.sc)} ${escapeHtml(c.name)}</a></td>` +
@@ -329,12 +311,8 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   }
 
   if (groups.length > 0) {
-    w('<h2>Findings</h2>');
-    w(
-      '<p>Ordered by severity, then by how many places each problem occurs in — which is ' +
-        'roughly the order they are worth fixing in, because a single wrong value in a shared ' +
-        'component usually accounts for a whole block of them.</p>',
-    );
+    w(`<h2>${escapeHtml(t.ui.findings)}</h2>`);
+    w(`<p>${escapeHtml(t.ui.findingsIntro)}</p>`);
   }
 
   // Instances per rule are capped by default. Four hundred copies of one finding is not
@@ -347,10 +325,15 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     w(`<section class="rule ${g.severity}">`);
     w('<div class="head">');
     w(
-      `<h3><span class="tag ${g.severity}">${g.severity}</span> ${escapeHtml(g.title)} ` +
-        `<span class="meta">(${plural(g.violations.length, 'occurrence')})</span></h3>`,
+      `<h3><span class="tag ${g.severity}">${escapeHtml(t.ui.severity(g.severity))}</span> ` +
+        `${escapeHtml(g.title)} ` +
+        `<span class="meta">(${escapeHtml(t.count(g.violations.length, 'occurrence'))})</span></h3>`,
     );
     if (g.summary !== '') w(`<p class="sub">${escapeHtml(g.summary)}</p>`);
+    // One sentence per rule goes here; one sentence per finding goes with the finding.
+    if (t.ui.impactPlacement === 'group') {
+      w(`<p class="impact">${escapeHtml(t.impact(g.violations[0] as Violation))}</p>`);
+    }
     const links = g.wcag.map((sc) => {
       const c = criterion(sc);
       const label = c === undefined ? sc : `${sc} ${c.name}`;
@@ -362,11 +345,15 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     w('</div>');
 
     for (const v of g.violations.slice(0, MAX_INSTANCES)) {
-      const r = remedy(v);
+      const r = t.remedy(v);
       w('<div class="instance">');
-      w(`<p class="where"><code>${escapeHtml(v.file)}</code> line ${v.line}</p>`);
+      w(
+        `<p class="where"><code>${escapeHtml(v.file)}</code> ${escapeHtml(t.ui.line)} ${v.line}</p>`,
+      );
       w(`<pre>${escapeHtml(v.excerpt)}</pre>`);
-      w(`<p class="impact">${escapeHtml(v.impact)}</p>`);
+      if (t.ui.impactPlacement === 'instance') {
+        w(`<p class="impact">${escapeHtml(t.impact(v))}</p>`);
+      }
       w(
         `<p class="remedy"><span class="kind">${escapeHtml(r.kind)}:</span> ${escapeHtml(r.text)}</p>`,
       );
@@ -374,10 +361,8 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     }
     if (g.violations.length > MAX_INSTANCES) {
       const rest = g.violations.length - MAX_INSTANCES;
-      w(
-        `<p class="more">${rest} further ${rest === 1 ? 'occurrence is' : 'occurrences are'} ` +
-          'not listed here. Run with <code>--all</code> for a report that lists every one.</p>',
-      );
+      // more() carries <code> tags of ours; rest is a number.
+      w(`<p class="more">${t.ui.more(rest)}</p>`);
     }
     w('</section>');
   }
@@ -385,26 +370,17 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   if (!includeInfo) {
     const hidden = all.length - shown.length;
     if (hidden > 0) {
-      w(
-        `<p class="sub">${plural(hidden, 'informational finding')} not shown. ` +
-          'These are conventions and hints rather than barriers; run with <code>--all</code> to include them.</p>',
-      );
+      w(`<p class="sub">${t.ui.hidden(escapeHtml(t.count(hidden, 'infoFinding')))}</p>`);
     }
   }
 
   w('<footer>');
   w(
-    `<p>Generated by a11yfix ${escapeHtml(options.toolVersion)} on ${escapeHtml(date)}` +
-      (options.command !== undefined
-        ? ` — reproduce with <code>${escapeHtml(options.command)}</code>`
-        : '') +
+    `<p>${escapeHtml(t.ui.generated(options.toolVersion, date))}` +
+      (options.command !== undefined ? t.ui.reproduce(escapeHtml(options.command)) : '') +
       '.</p>',
   );
-  w(
-    '<p>A11yFix does not invent alternative text, link text or language codes, and does not ' +
-      'claim conformance. Where a correct answer requires knowing what something means, it says so ' +
-      'and stops.</p>',
-  );
+  w(`<p>${escapeHtml(t.ui.footerPromise)}</p>`);
   w('</footer>');
 
   w('</div></body></html>');

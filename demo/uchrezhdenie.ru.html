@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+  ОБРАЗЕЦ. Вымышленное учреждение, вымышленные данные.
+
+  Страница собрана из того, что реально встречается на сайтах школ, библиотек, музеев
+  и МФЦ: виджет «версия для слабовидящих» вместо доступной вёрстки, светло-серый текст,
+  таблица расписания без заголовков, форма с подписями внутри полей, кнопки-иконки без
+  имени, карта в iframe без title. Ни одно из этих нарушений не выдумано ради демонстрации.
+
+  Служит фикстурой: `a11yfix demo/uchrezhdenie.ru.html --report --lang ru`.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; color: #333; }
+    .header { background: #1a4d7a; padding: 16px 24px; }
+    .header a { color: #b8d4e8; }
+    .nav { background: #f0f2f5; padding: 10px 24px; }
+    .nav a { color: #7a8899; margin-right: 18px; text-decoration: none; }
+    .content { padding: 24px; max-width: 900px; }
+    .lead { color: #999999; font-size: 15px; }
+    .note { color: #a8a8a8; font-size: 13px; }
+    .card { border: 1px solid #ececec; padding: 16px; margin: 12px 0; }
+    .card a { color: #2b7bb9; text-decoration: none; }
+    table { border-collapse: collapse; width: 100%; }
+    table td { border: 1px solid #ddd; padding: 6px 10px; font-size: 14px; }
+    .btn { background: #1a4d7a; color: #7f9fbb; border: 0; padding: 10px 18px; }
+    .icon { background: none; border: 0; cursor: pointer; font-size: 18px; }
+    .footer { background: #f0f2f5; padding: 20px 24px; color: #9a9a9a; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <img src="/img/gerb.png" width="40">
+  <span style="color:#c4d8e8; font-size:20px">Городская библиотека № 1</span>
+  <a href="#" onclick="setBigFont()" style="float:right">Версия для слабовидящих</a>
+</div>
+
+<div class="nav">
+  <a href="/about">О библиотеке</a>
+  <a href="/news">Новости</a>
+  <a href="/services">Услуги</a>
+  <a href="/contacts">Контакты</a>
+  <a href="/docs/ustav.pdf" target="_blank">Устав</a>
+</div>
+
+<div class="content">
+  <h2>Добро пожаловать</h2>
+  <p class="lead">
+    Библиотека работает с 1962 года. В фонде более 120 000 изданий, читальный зал,
+    электронный каталог и доступ к Национальной электронной библиотеке.
+  </p>
+
+  <h4>Расписание работы</h4>
+  <table>
+    <tr>
+      <td>День</td>
+      <td>Часы</td>
+      <td>Читальный зал</td>
+    </tr>
+    <tr><td>Понедельник — пятница</td><td>10:00 — 19:00</td><td>до 18:00</td></tr>
+    <tr><td>Суббота</td><td>10:00 — 16:00</td><td>закрыт</td></tr>
+    <tr><td>Воскресенье</td><td>выходной</td><td>—</td></tr>
+  </table>
+  <p class="note">Последний четверг месяца — санитарный день.</p>
+
+  <h3>Новости</h3>
+
+  <div class="card">
+    <img src="/upload/news/IMG_20260812.jpg" width="120">
+    <h4>Встреча с писателем</h4>
+    <p class="lead">12 августа в читальном зале состоится встреча с автором книги о городе.</p>
+    <a href="/news/1">Подробнее</a>
+  </div>
+
+  <div class="card">
+    <img src="/upload/news/photo2.jpg" alt="фото" width="120">
+    <h4>Летний читальный зал</h4>
+    <p class="lead">Во дворе библиотеки открыт летний читальный зал.</p>
+    <a href="/news/2">Подробнее</a>
+  </div>
+
+  <h3>Записаться в библиотеку</h3>
+  <form action="/signup" method="post">
+    <p><input type="text" placeholder="Фамилия Имя Отчество" style="width:320px"></p>
+    <p><input type="text" placeholder="например, ivan@mail.ru" style="width:320px"></p>
+    <p><input type="text" placeholder="+7 (___) ___-__-__" style="width:320px"></p>
+    <p>
+      <input type="checkbox">
+      Согласен на обработку персональных данных
+    </p>
+    <p><button class="btn" type="submit">Отправить</button></p>
+  </form>
+
+  <h3>Как нас найти</h3>
+  <iframe src="https://example.org/map/embed" width="100%" height="300"></iframe>
+
+  <p>
+    <button class="icon" onclick="share()">🔗</button>
+    <button class="icon" onclick="print()">🖨</button>
+    <span onclick="scrollTop()" style="color:#2b7bb9">Наверх</span>
+  </p>
+</div>
+
+<div class="footer">
+  <p>© 1962—2026. Все права защищены.</p>
+  <p>
+    <a href="/privacy">Политика конфиденциальности</a> ·
+    <a href="#feedback">Обратная связь</a>
+  </p>
+</div>
+
+</body>
+</html>

@@ -171,6 +171,25 @@ When findings in the baseline stop occurring, the run says so and suggests rewri
 so the file shrinks as the codebase improves instead of quietly accumulating permission
 to regress.
 
+## The report
+
+`--report` writes one self-contained HTML file: no scripts, no fonts, no images. It
+opens offline, prints, and survives being emailed. Each finding carries the file, the
+line and the exact source that triggered it, so every claim in it can be checked in
+under a minute — and the limits of what a source analyser can see are stated before the
+findings rather than after.
+
+```bash
+npx a11yfix . --report                 # a11yfix-report.html
+npx a11yfix . --report audit.html --lang ru
+```
+
+`--lang ru` translates the report, not the terminal: the person who runs the command
+reads English compiler output all day, and the person the report is handed to may not.
+Every rule has Russian text and a test fails the build if one is added without it. Where
+a patch is offered, the change itself — `text-gray-400 → text-gray-600` — is printed in
+both languages, because that is the line a reader checks against their own file.
+
 ## Configuration
 
 `.a11yfixrc.json` in the project root, or an `a11yfix` key in `package.json`. A

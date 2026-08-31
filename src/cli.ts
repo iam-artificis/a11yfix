@@ -5,6 +5,7 @@ import type { FixSafety, Level, RunSummary, Violation } from './types.js';
 import { analyseSource, kindOf, packageRootOf, VERSION } from './engine.js';
 import { isIgnored, loadConfig } from './config.js';
 import { buildBaseline, compareToBaseline, readBaseline, writeBaseline } from './baseline.js';
+import type { Lang } from './i18n/index.js';
 import { renderReport } from './report.js';
 import { countByFixClass, fixClass } from './fix/classify.js';
 import { unifiedDiff } from './fix/apply.js';
@@ -46,6 +47,11 @@ interface Options {
   baselineWrite: boolean;
   /** Path for --report, or undefined when it was not asked for. */
   report?: string;
+  /**
+   * Language of the report. The terminal stays English either way — it is read by the
+   * person who ran the command; the report is read by whoever commissioned the work.
+   */
+  reportLang: Lang;
   /** Glob patterns from --ignore, merged with the config file's. */
   ignore: string[];
   /** Set when --level was passed, so a config file cannot override an explicit flag. */
@@ -54,6 +60,12 @@ interface Options {
   writeFailures?: { file: string; reason: string }[];
   help: boolean;
   version: boolean;
+  /**
+   * A flag whose value could not be used. Reported and exited on rather than ignored:
+   * silently falling back would hand somebody an English report they asked in Russian
+   * for, and they would not find out until the client did.
+   */
+  error?: string;
   maxFiles: number;
 }
 
@@ -87,6 +99,7 @@ function parseArgs(argv: readonly string[]): Options {
     disable: [],
     baselineEnabled: false,
     baselineWrite: false,
+    reportLang: 'en',
     ignore: [],
     levelFromFlag: false,
     help: false,
@@ -98,6 +111,15 @@ function parseArgs(argv: readonly string[]): Options {
     switch (a) {
       case '--fix': o.fix = true; break;
       case '--include-review': o.includeReview = true; break;
+      case '--lang': {
+        const next = argv[++i];
+        if (next !== 'en' && next !== 'ru') {
+          o.error = `--lang takes en or ru, not ${next ?? '(nothing)'}`;
+          break;
+        }
+        o.reportLang = next;
+        break;
+      }
       case '--mark-todos': o.markTodos = true; break;
       case '--diff': o.diff = true; break;
       case '--json': o.json = true; break;
@@ -411,6 +433,7 @@ OPTIONS
   --baseline [PATH]   Report only findings absent from the baseline
   --baseline-write    Record current findings as the baseline and exit
   --report [PATH]     Write a standalone HTML audit report (default a11yfix-report.html)
+  --lang en|ru        Language of that report (default en). The terminal stays English.
   --rules             List every rule and exit
   --max-files N       Safety limit on files scanned (default: 5000)
   --version, -v
@@ -448,6 +471,10 @@ async function main(): Promise<number> {
   if (opts.help) {
     console.log(HELP);
     return 0;
+  }
+  if (opts.error !== undefined) {
+    console.error(opts.error);
+    return 2;
   }
   if (opts.version) {
     console.log(VERSION);
@@ -687,6 +714,7 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
       toolVersion: VERSION,
       includeInfo: opts.all,
       command: reportCommand(opts.paths),
+      lang: opts.reportLang,
     });
     try {
       await writeFile(opts.report, html, 'utf8');
