@@ -74,6 +74,15 @@ const VOID_ELEMENTS = new Set([
 /** Elements whose content is not markup and must not be scanned for tags. */
 const RAW_TEXT_ELEMENTS = new Set(['script', 'style', 'textarea', 'title', 'pre']);
 
+/**
+ * The subset whose content really is text rather than markup.
+ *
+ * `<pre>` is in the set above because its whitespace is significant, but its children are
+ * ordinary elements and skipping over them would lose every finding inside a code sample.
+ * These four hold text a browser never parses as tags.
+ */
+const RAW_TEXT_BODIES = new Set(['script', 'style', 'textarea', 'title']);
+
 const NAME_START = /[A-Za-z_$]/;
 const NAME_CHAR = /[-A-Za-z0-9_:.$]/;
 
@@ -419,17 +428,154 @@ function findCloseTag(src: string, tag: string, from: number): CloseSearch {
     let k = lt + 1;
     if (k < src.length && NAME_START.test(src[k] as string)) {
       while (k < src.length && NAME_CHAR.test(src[k] as string)) k++;
-      if (src.slice(lt + 1, k).toLowerCase() === lower) {
+      const name = src.slice(lt + 1, k).toLowerCase();
+      if (name === lower) {
         // Nested same-tag open: only counts if it is not self-closing.
         const gt = src.indexOf('>', k);
         if (gt > 0 && src[gt - 1] !== '/') depth++;
         i = gt < 0 ? src.length : gt + 1;
         continue;
       }
+      // A script or style body is text, not markup, and counting tags inside one is how
+      // a correctly balanced document comes out unbalanced. `document.write('<div ...>')`
+      // raises the depth by two with nothing to lower it again, so the enclosing element
+      // never finds its close, collapses to zero length, and every descendant is
+      // re-parented onto <body> — taking the selectors that styled them with it. Both
+      // "unclosed" elements on libnn.ru and tretyakovgallery.ru are this, not a real
+      // missing tag, which is why this has to be right before anything is done about
+      // genuinely unclosed elements.
+      if (RAW_TEXT_BODIES.has(name) && name !== lower) {
+        const gt = src.indexOf('>', k);
+        if (gt < 0) return { found: null, sawClose };
+        // `<textarea … />` in JSX has no body and no closing tag. Hunting for one runs off
+        // the end of the file, and the element we were actually looking for — the `<label>`
+        // wrapped around that textarea, the `<form>` around it — is then reported as never
+        // closed. Two false findings on shadcn and cal.com came from exactly this.
+        if (src[gt - 1] === '/') {
+          i = gt + 1;
+          continue;
+        }
+        const body = indexOfCloseTag(src, name, gt + 1);
+        if (body < 0) return { found: null, sawClose };
+        const bodyGt = src.indexOf('>', body);
+        i = bodyGt < 0 ? src.length : bodyGt + 1;
+        continue;
+      }
     }
     i = lt + 1;
   }
   return { found: null, sawClose };
+}
+
+/**
+ * Elements HTML lets you leave unclosed, and the opening tags that close them.
+ *
+ * `</li>` is optional and always has been, so a menu written
+ *
+ *     <li>
+ *       <a href="/o-teatre/">О театре</a>
+ *       <ul class="header-nav-second-level"> … </ul>
+ *     <li>
+ *
+ * is not malformed. This parser treated the first `<li>` as having no end at all, which
+ * collapsed it to zero length and re-parented its `<a>` and its nested `<ul>` onto the
+ * enclosing list — so A11Y-DOC-007 reported "an `<a>` is a direct child of `<ul>`, which
+ * may only contain `<li>`" about markup that is entirely correct. Twenty-four findings on
+ * one theatre's front page, and fourteen unclosed `<li>` on it that a browser has no
+ * trouble with.
+ *
+ * The value is the set of opening tags that end an open one of these at the same level.
+ * Membership is the whole test: a tag absent from this map keeps its old behaviour of
+ * ending where it opened, because outside this list a missing end tag is a guess.
+ */
+const IMPLICIT_CLOSERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['li', new Set(['li'])],
+  ['dt', new Set(['dt', 'dd'])],
+  ['dd', new Set(['dt', 'dd'])],
+  ['option', new Set(['option', 'optgroup'])],
+  ['optgroup', new Set(['optgroup'])],
+  ['tr', new Set(['tr', 'thead', 'tbody', 'tfoot'])],
+  ['td', new Set(['td', 'th', 'tr', 'thead', 'tbody', 'tfoot'])],
+  ['th', new Set(['td', 'th', 'tr', 'thead', 'tbody', 'tfoot'])],
+  ['thead', new Set(['tbody', 'tfoot'])],
+  ['tbody', new Set(['tbody', 'tfoot'])],
+  ['rt', new Set(['rt', 'rp'])],
+  ['rp', new Set(['rt', 'rp'])],
+  [
+    'p',
+    new Set([
+      'address', 'article', 'aside', 'blockquote', 'details', 'div', 'dl', 'fieldset',
+      'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'header', 'hr', 'main', 'menu', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'ul',
+    ]),
+  ],
+]);
+
+/**
+ * Where an element with no closing tag actually ends.
+ *
+ * Scans forward at the element's own level: descendants raise a depth counter and their
+ * closes lower it, so a `<li>` inside a nested `<ul>` does not end the outer one. The
+ * element stops at the first sibling-level opening tag that implicitly closes it, or at
+ * the first closing tag belonging to something that encloses it — which is what a browser
+ * does with a `<div>` nobody closed.
+ *
+ * Returns the offset where the element ends. The caller uses it for both `end` and the
+ * content end, because there is no closing tag to step over.
+ */
+function implicitEnd(src: string, from: number, closers: ReadonlySet<string>): number {
+  let depth = 0;
+  let i = from;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt < 0) return src.length;
+
+    if (src.startsWith('<!--', lt)) {
+      const close = src.indexOf('-->', lt + 4);
+      i = close < 0 ? src.length : close + 3;
+      continue;
+    }
+    if (src[lt + 1] === '!' || src[lt + 1] === '?') {
+      const gt = src.indexOf('>', lt);
+      i = gt < 0 ? src.length : gt + 1;
+      continue;
+    }
+
+    if (src[lt + 1] === '/') {
+      let k = lt + 2;
+      while (k < src.length && NAME_CHAR.test(src[k] as string)) k++;
+      // At our own level, a closing tag can only belong to something that contains us.
+      if (depth === 0) return lt;
+      depth--;
+      const gt = src.indexOf('>', k);
+      i = gt < 0 ? src.length : gt + 1;
+      continue;
+    }
+
+    let k = lt + 1;
+    if (k >= src.length || !NAME_START.test(src[k] as string)) {
+      i = lt + 1;
+      continue;
+    }
+    while (k < src.length && NAME_CHAR.test(src[k] as string)) k++;
+    const name = src.slice(lt + 1, k).toLowerCase();
+    const gt = src.indexOf('>', k);
+    const past = gt < 0 ? src.length : gt + 1;
+
+    if (depth === 0 && closers.has(name)) return lt;
+
+    if (RAW_TEXT_BODIES.has(name)) {
+      const body = indexOfCloseTag(src, name, past);
+      if (body < 0) return src.length;
+      const bodyGt = src.indexOf('>', body);
+      i = bodyGt < 0 ? src.length : bodyGt + 1;
+      continue;
+    }
+    // A void or self-closing element opens nothing.
+    if (!VOID_ELEMENTS.has(name) && !(gt > 0 && src[gt - 1] === '/')) depth++;
+    i = past;
+  }
+  return src.length;
 }
 
 /** Parse markup, preserving every source offset. Never throws on malformed input. */
@@ -548,18 +694,47 @@ export function parseMarkup(source: string, options: ParseOptions = {}): ParsedM
           end = source.length;
           innerSource = source.slice(openEnd);
         }
-      } else if (!unclosedTags.has(tagLower)) {
-        const close = findCloseTag(source, tagLower, openEnd);
-        if (close.found !== null) {
+      } else {
+        const close = unclosedTags.has(tagLower) ? null : findCloseTag(source, tagLower, openEnd);
+        if (close !== null && close.found !== null) {
           innerSource = source.slice(openEnd, close.found.contentEnd);
           end = close.found.end;
-        } else if (!close.sawClose) {
-          // There is no </tag anywhere ahead, so no later element of this name needs to
-          // go looking for one.
-          unclosedTags.add(tagLower);
+        } else {
+          if (close !== null && !close.sawClose) {
+            // There is no </tag anywhere ahead, so no later element of this name needs to
+            // go looking for one.
+            unclosedTags.add(tagLower);
+          }
+          // No closing tag. For a `<li>` or a `<p>` that is not sloppiness at all — the
+          // spec says their end tag may be omitted — and a browser ends the element where
+          // the next thing that replaces or encloses it begins. Leaving `end` at `openEnd`
+          // instead, which is what happened before, collapses the element to nothing and
+          // hands its children to its grandparent: that is how correctly written markup
+          // came to be reported as a list containing something that is not a list item.
+          //
+          // Only for the elements the spec names. A `<div>` nobody closed also ends at its
+          // parent, but guessing that costs more than it pays: a source file is full of
+          // things that only look like tags, and giving them extent puts them above real
+          // markup. `ComponentProps<typeof Sidebar>` tokenises as an element named
+          // `typeof`; extend it and it becomes the parent of every `<li>` after it, which
+          // invented nine findings across shadcn's sidebars. The elements whose end tag is
+          // genuinely optional are a closed list, so that is the list we act on.
+          const closers = IMPLICIT_CLOSERS.get(tagLower);
+          const stop = closers === undefined ? openEnd : implicitEnd(source, openEnd, closers);
+          if (stop > openEnd) {
+            end = stop;
+            innerSource = source.slice(openEnd, stop);
+          }
         }
       }
     }
+
+    // An element with an implied end has no closing tag to pop it off the stack, so drop
+    // anything the scan has already run past the end of. Without this the end offset is
+    // right and the parentage is still wrong: `<li>a<li>b` gives the second item the first
+    // one as its parent instead of as its sibling, and every item in a menu written that
+    // way nests one level deeper than the last.
+    while (stack.length > 0 && (stack[stack.length - 1] as Element).end <= lt) stack.pop();
 
     const parent = stack.length > 0 ? (stack[stack.length - 1] as Element) : null;
     const el: Element = {

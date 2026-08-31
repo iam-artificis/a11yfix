@@ -358,3 +358,116 @@ test('a paginated link written with entity arrows is not empty', () => {
   // &laquo;/&raquo; pagers are ordinary Russian CMS output.
   assert.ok(!ids('<a href="/page/2/">&raquo;</a>').includes('A11Y-LINK-001'));
 });
+
+/**
+ * Elements HTML lets you leave unclosed.
+ *
+ * `</li>` has been optional since HTML 2. A theatre's front page written that way had its
+ * every `<li>` collapsed to zero length, which handed each item's `<a>` and its nested
+ * submenu to the enclosing `<ul>` — and A11Y-DOC-007 then reported twenty-four times that
+ * a list contained something other than a list item, about markup that is entirely
+ * correct. The tests below fix both halves of the answer: which elements get an implied
+ * end, and which deliberately do not.
+ */
+
+test('a list item with no closing tag keeps its own children', () => {
+  const source = '<ul><li><a href="/a/">A</a><ul><li>deep</li></ul><li><a href="/b/">B</a></ul>';
+  const { elements } = parse(source);
+  const items = elements.filter((e) => e.tagLower === 'li');
+  const first = items[0];
+  const link = elements.find((e) => getAttr(e, 'href')?.value === '/a/');
+  const inner = elements.filter((e) => e.tagLower === 'ul')[1];
+  assert.equal(link.parent, first, 'the <a> belongs to the <li> it was written inside');
+  assert.equal(inner.parent, first, 'so does the submenu');
+  assert.ok(first.end > first.openEnd, 'the item has extent, not zero length');
+});
+
+test('the live case: an unclosed menu is not reported as a malformed list', () => {
+  const source =
+    '<ul class="nav"><li><a href="/o/">О театре</a><ul class="sub"><li><a href="/x/">X</a></ul>' +
+    '<li><a href="/afisha/">Афиша</a></ul>';
+  assert.ok(
+    !ids(source).includes('A11Y-DOC-007'),
+    'omitting </li> is valid HTML and must not be reported as a list containing a non-item',
+  );
+});
+
+test('each element with an optional end tag is ended by the right sibling', () => {
+  const cases = [
+    ['<dl><dt>term<dd>definition<dt>next</dl>', 'dt', 2],
+    ['<select><option>a<option>b<option>c</select>', 'option', 3],
+    ['<table><tr><td>a<td>b<tr><td>c</table>', 'td', 3],
+    ['<div><p>one<p>two<div>three</div></div>', 'p', 2],
+  ];
+  for (const [source, tag, count] of cases) {
+    const { elements } = parse(source);
+    const found = elements.filter((e) => e.tagLower === tag);
+    assert.equal(found.length, count, `${tag} count in ${source}`);
+    for (const el of found) {
+      assert.ok(el.end > el.openEnd, `<${tag}> in ${source} should have extent`);
+    }
+  }
+});
+
+test('a <p> is ended by the block that follows it, not by the next inline element', () => {
+  const { elements } = parse('<div><p>text<span>inside</span><div>after</div></div>');
+  const p = elements.find((e) => e.tagLower === 'p');
+  const span = elements.find((e) => e.tagLower === 'span');
+  const after = elements.filter((e) => e.tagLower === 'div')[1];
+  assert.equal(span.parent, p, 'a <span> does not close a <p>');
+  assert.notEqual(after.parent, p, 'a <div> does');
+});
+
+test('a tag outside that list is left collapsed rather than guessed at', () => {
+  // The deliberate limit. A source file is full of things that only look like tags:
+  // `ComponentProps<typeof Sidebar>` tokenises as an element named `typeof`, and giving
+  // it extent makes it the parent of every list item after it — nine invented findings
+  // across shadcn's sidebars. An unclosed <div> loses the same way, so neither is guessed.
+  const { elements } = parse('<Wrapper><div class="never-closed"><ul><li>a</li></ul>');
+  const div = elements.find((e) => e.tagLower === 'div');
+  const list = elements.find((e) => e.tagLower === 'ul');
+  assert.equal(div.end, div.openEnd, 'an unclosed <div> is not extended');
+  assert.notEqual(list.parent, div, 'so it does not adopt what follows it');
+});
+
+test('a self-closing textarea does not swallow the rest of the file', () => {
+  // <textarea> holds raw text, so the search for an enclosing element's closing tag has
+  // to step over its body. In JSX it is often written `<textarea … />` with no body and
+  // no closing tag at all; hunting for one ran to the end of the file, and the <label>
+  // wrapped around it was then reported as never closed — so the field inside it had no
+  // label, and the <form> around that had no fields.
+  const source = '<form><label>Body <textarea name="b" rows={8} /></label><button>Go</button></form>';
+  const { elements } = parse(source);
+  const label = elements.find((e) => e.tagLower === 'label');
+  const area = elements.find((e) => e.tagLower === 'textarea');
+  const button = elements.find((e) => e.tagLower === 'button');
+  assert.ok(label.end > label.openEnd, 'the <label> is closed where it says it is');
+  assert.equal(area.parent, label, 'the field is inside its label');
+  assert.ok(button !== undefined, 'and the rest of the form is still parsed');
+});
+
+test('a textarea that does have a body still hides its contents', () => {
+  const { elements } = parse('<div><textarea><p>literal</p></textarea><span>after</span></div>');
+  assert.equal(
+    elements.filter((e) => e.tagLower === 'p').length,
+    0,
+    'text inside a textarea is text, not markup',
+  );
+  const span = elements.find((e) => e.tagLower === 'span');
+  const div = elements.find((e) => e.tagLower === 'div');
+  assert.equal(span.parent, div, 'and the element around it still closes');
+});
+
+test('items with implied ends are siblings, not a chain of ancestors', () => {
+  // The end offset alone is not enough: nothing pops an element that has no closing tag,
+  // so without an explicit sweep each <li> adopts the one after it and a ten-item menu
+  // reports as ten levels of nesting.
+  const { elements } = parse('<ul><li>a<li>b<li>c</ul>');
+  const items = elements.filter((e) => e.tagLower === 'li');
+  const list = elements.find((e) => e.tagLower === 'ul');
+  for (const li of items) {
+    assert.equal(li.parent, list, 'every item hangs off the list itself');
+    assert.equal(li.depth, list.depth + 1, 'and sits one level below it');
+  }
+  assert.equal(list.children.length, 3, 'the list has three children, not one');
+});
