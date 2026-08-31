@@ -198,6 +198,14 @@ Every rule has Russian text and a test fails the build if one is added without i
 a patch is offered, the change itself — `text-gray-400 → text-gray-600` — is printed in
 both languages, because that is the line a reader checks against their own file.
 
+The Russian report also names each criterion the way ГОСТ Р 52872-2019 names it —
+«1.4.3 Контрастность (минимальные требования) (п. 4.1.4)» — because that is the wording
+in the contract the reader is holding. No correspondence had to be invented: the standard
+was written from WCAG 2.1 and kept its numbering exactly, so the mapping is an identity
+and all 78 criteria are transcribed from the standard's own text. It still does not issue
+a conformance statement, and [docs/gost.md](docs/gost.md) says which 19 of the 78 the tool
+reaches and why the other 59 need a person.
+
 ## Configuration
 
 `.a11yfixrc.json` in the project root, or an `a11yfix` key in `package.json`. A

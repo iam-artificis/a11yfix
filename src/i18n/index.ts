@@ -92,6 +92,10 @@ const EN_UI: UiStrings = {
   byCriterionIntro:
     'The same findings, grouped by the part of WCAG 2.2 they fall under. Each criterion ' +
     'links to the W3C’s own explanation.',
+  criterionName: (sc, english) => `${sc} ${english}`,
+  criterionLevel: (level) => level,
+  criterionPrefix: 'WCAG',
+  criterionNote: '',
   colCriterion: 'Criterion',
   colLevel: 'Level',
   colFindings: 'Findings',

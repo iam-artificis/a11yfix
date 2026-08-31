@@ -20,6 +20,7 @@
  */
 
 import type { RuleText, UiStrings } from './types.js';
+import { GOST_NAME, gost, gostSection } from '../gost.js';
 
 /** Report chrome: everything the report writes about itself. */
 export const UI_RU: UiStrings = {
@@ -56,8 +57,24 @@ export const UI_RU: UiStrings = {
     'заменяет.',
   byCriterion: 'По критериям успеха',
   byCriterionIntro:
-    'Те же находки, сгруппированные по разделам WCAG 2.2. Каждый критерий ведёт на ' +
-    'страницу W3C с его собственным описанием.',
+    'Те же находки, сгруппированные по критериям. Названия критериев — по ГОСТ Р ' +
+    '52872-2019; ссылка ведёт на подробное описание того же критерия у W3C.',
+  criterionName: (sc, english) => {
+    const g = gost(sc);
+    if (g === undefined) return `${sc} ${english}`.trim();
+    const section = gostSection(sc);
+    return `${sc} ${g.title}${section === undefined ? '' : ` (п. ${section})`}`;
+  },
+  // The standard writes its levels in Cyrillic, and a contract quoting it will too.
+  criterionLevel: (level) => level.replace(/A/g, 'А'),
+  criterionPrefix: `${GOST_NAME} / WCAG, критерий`,
+  criterionNote:
+    'Нумерация критериев в ГОСТ Р 52872-2019 совпадает с нумерацией WCAG: стандарт ' +
+    'разработан на основе WCAG 2.1 и сохранил её. Названия и уровни приведены по ' +
+    'официальному тексту стандарта (введён 01.04.2020, приказ Росстандарта от ' +
+    '29.08.2019 № 589-ст). Ссылки ведут на сайт W3C, потому что у ГОСТа нет ' +
+    'публичной постатейной версии. Все критерии, которые проверяет этот инструмент, ' +
+    'в стандарте есть.',
   colCriterion: 'Критерий',
   colLevel: 'Уровень',
   colFindings: 'Находок',

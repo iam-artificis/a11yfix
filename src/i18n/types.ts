@@ -32,6 +32,20 @@ export interface UiStrings {
   readonly caveatBody2: string;
   readonly byCriterion: string;
   readonly byCriterionIntro: string;
+  /**
+   * The criterion as this language names it.
+   *
+   * English uses the W3C's title. Russian uses ГОСТ Р 52872-2019's, which is the wording
+   * that appears in the contract the reader is holding — the numbering is identical
+   * because the standard was written from WCAG 2.1 and kept it.
+   */
+  criterionName(sc: string, english: string): string;
+  /** Conformance level as this language writes it — 'AA' in Latin, 'АА' in Cyrillic. */
+  criterionLevel(level: string): string;
+  /** What standard the criterion column cites. */
+  readonly criterionPrefix: string;
+  /** Provenance for the criterion names. Empty where there is nothing to explain. */
+  readonly criterionNote: string;
   readonly colCriterion: string;
   readonly colLevel: string;
   readonly colFindings: string;

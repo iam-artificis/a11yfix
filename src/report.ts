@@ -303,11 +303,12 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     );
     for (const c of criterionRows) {
       w(
-        `<tr><td><a href="${escapeHtml(criterionUrl(c.sc))}">${escapeHtml(c.sc)} ${escapeHtml(c.name)}</a></td>` +
-          `<td>${escapeHtml(c.level)}</td><td class="num">${perCriterion.get(c.sc) as number}</td></tr>`,
+        `<tr><td><a href="${escapeHtml(criterionUrl(c.sc))}">${escapeHtml(t.ui.criterionName(c.sc, c.name))}</a></td>` +
+          `<td>${escapeHtml(t.ui.criterionLevel(c.level))}</td><td class="num">${perCriterion.get(c.sc) as number}</td></tr>`,
       );
     }
     w('</tbody></table>');
+    if (t.ui.criterionNote !== '') w(`<p class="sub">${escapeHtml(t.ui.criterionNote)}</p>`);
   }
 
   if (groups.length > 0) {
@@ -336,11 +337,13 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
     }
     const links = g.wcag.map((sc) => {
       const c = criterion(sc);
-      const label = c === undefined ? sc : `${sc} ${c.name}`;
+      const label = t.ui.criterionName(sc, c === undefined ? '' : c.name).trim();
       return `<a href="${escapeHtml(criterionUrl(sc))}">${escapeHtml(label)}</a>`;
     });
     w(
-      `<p class="meta">${escapeHtml(g.ruleId)}${links.length > 0 ? ' · WCAG ' + links.join(', ') : ''}</p>`,
+      `<p class="meta">${escapeHtml(g.ruleId)}` +
+        (links.length > 0 ? ` · ${escapeHtml(t.ui.criterionPrefix)} ${links.join(', ')}` : '') +
+        '</p>',
     );
     w('</div>');
 
