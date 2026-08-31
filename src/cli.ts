@@ -78,7 +78,14 @@ interface Options {
 }
 
 /** What the report says it audited: the paths asked for, or the working directory. */
-function reportSubject(paths: readonly string[]): string {
+function reportSubject(paths: readonly string[], pages: readonly FetchedPage[]): string {
+  // A run over URLs is about the site. Without this, --sitemap left `paths` empty and the
+  // report was titled after whatever directory the command was typed in — "a11yfix" — on
+  // a document whose whole job is to be handed to the site's owner.
+  if (pages.length > 0) {
+    const hosts = [...new Set(pages.map((p) => new URL(p.url).host))];
+    return hosts.join(', ');
+  }
   if (paths.length === 0 || (paths.length === 1 && paths[0] === '.')) {
     const cwd = process.cwd();
     const parts = cwd.split(/[\\/]/).filter((p) => p !== '');
@@ -88,7 +95,8 @@ function reportSubject(paths: readonly string[]): string {
 }
 
 /** The command that reproduces this report, printed in its footer. */
-function reportCommand(paths: readonly string[]): string {
+function reportCommand(paths: readonly string[], sitemap: string | undefined): string {
+  if (sitemap !== undefined) return `a11yfix --sitemap ${sitemap} --report`;
   return `a11yfix ${paths.length === 0 ? '.' : paths.join(' ')} --report`;
 }
 
@@ -866,7 +874,7 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
 
   if (opts.report !== undefined) {
     const html = renderReport(summary, {
-      subject: reportSubject(opts.paths),
+      subject: reportSubject(opts.paths, opts.fetched ?? []),
       fetched: (opts.fetched ?? []).map((f) => ({
         url: f.url,
         file: f.file,
@@ -876,7 +884,7 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
       level: opts.level,
       toolVersion: VERSION,
       includeInfo: opts.all,
-      command: reportCommand(opts.paths),
+      command: reportCommand(opts.paths, opts.sitemap),
       lang: opts.reportLang,
     });
     try {

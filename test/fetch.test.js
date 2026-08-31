@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fetchPage, fetchSitemap, isUrl, spread } from '../dist/fetch.js';
 
 /**
@@ -249,6 +252,20 @@ test('a redirect is followed and said out loud', async () => {
  */
 
 
+/**
+ * The CLI as a child process, without blocking this one.
+ *
+ * execFileSync stops this process's event loop, so a test server running here cannot
+ * answer the child and every request times out. Any test that points the CLI at
+ * withServer has to await instead.
+ */
+const cliAsync = (args) =>
+  new Promise((resolve) => {
+    execFile(process.execPath, ['dist/cli.js', ...args], { encoding: 'utf8' }, (err, out, e) =>
+      resolve({ code: err?.code ?? 0, out: out ?? '', err: e ?? '' }),
+    );
+  });
+
 const cli = (args) => {
   try {
     const stdout = execFileSync(process.execPath, ['dist/cli.js', ...args], {
@@ -470,6 +487,40 @@ test('a front page listed in the middle of the sitemap is still read', async () 
         !r.notes.some((n) => n.includes('does not list the front page')),
         'it was listed, so nothing is claimed about it being missing',
       );
+    },
+  );
+});
+
+test('a site audit is titled after the site, and counts pages rather than files', async () => {
+  // Both of these read as carelessness on a document whose whole job is to be handed to
+  // the site's owner: a report titled after the directory the command was typed in, and
+  // a count of "files" the reader does not have and cannot check.
+  await withServer(
+    (req, res) => {
+      const origin = `http://127.0.0.1:${res.socket.localPort}`;
+      if (req.url === '/sitemap.xml') {
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        res.end(sitemapOf([`${origin}/a/`, `${origin}/b/`]));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(PAGE(`<main><h1>Т</h1>${FULL_BODY}<img src="x.png"></main>`));
+    },
+    async (base) => {
+      const out = join(tmpdir(), `a11yfix-subject-${process.pid}.html`);
+      try {
+        await cliAsync(['--sitemap', `${base}/sitemap.xml`, '--report', out, '--quiet']);
+        const html = readFileSync(out, 'utf8');
+        assert.ok(
+          html.includes(`<h1>Accessibility audit: ${base.replace('http://', '')}</h1>`),
+          'the report is titled after the site, not the working directory',
+        );
+        assert.match(html, /pages scanned/);
+        assert.ok(!/files scanned/.test(html), 'a site audit does not scan files');
+        assert.ok(html.includes(`--sitemap ${base}/sitemap.xml --report`));
+      } finally {
+        rmSync(out, { force: true });
+      }
     },
   );
 });

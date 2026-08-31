@@ -5,6 +5,9 @@
  * fails the build in the language that is missing it, instead of quietly falling back and
  * shipping a half-translated report to a client.
  */
+/** Whether this run read files from a project or pages from a website. */
+export type Unit = 'file' | 'page';
+
 export interface UiStrings {
   /**
    * Where the "why it matters" sentence goes.
@@ -18,14 +21,20 @@ export interface UiStrings {
   readonly htmlLang: string;
   readonly titlePrefix: string;
   subject(name: string): string;
-  subline(date: string, level: string, files: number, version: string): string;
+  /**
+   * What was scanned, in the reader's own words.
+   *
+   * A site audit that says it checked "48 files" is describing something the reader does
+   * not have and cannot check. They have pages.
+   */
+  subline(date: string, level: string, scanned: number, version: string, unit: Unit): string;
   readonly cardErrors: string;
   readonly cardWarnings: string;
   readonly cardFixable: string;
   readonly cardManual: string;
   readonly whatThisIs: string;
-  clean(files: number): string;
-  found(findings: number, files: number): string;
+  clean(scanned: number, unit: Unit): string;
+  found(findings: number, scanned: number, unit: Unit): string;
   readonly caveatHead: string;
   caveatBody(partial: number, total: number): string;
   /** Contains our own <code> tags, so it is written into the page unescaped. */

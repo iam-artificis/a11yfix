@@ -63,21 +63,21 @@ const EN_UI: UiStrings = {
   htmlLang: 'en',
   titlePrefix: 'Accessibility audit',
   subject: (name) => `Accessibility audit: ${name}`,
-  subline: (date, level, files, version) =>
-    `${date} · WCAG 2.2 level ${level} · ${pluralEn(files, 'file')} scanned · a11yfix ${version}`,
+  subline: (date, level, scanned, version, unit) =>
+    `${date} · WCAG 2.2 level ${level} · ${pluralEn(scanned, unit)} scanned · a11yfix ${version}`,
   cardErrors: 'Errors',
   cardWarnings: 'Warnings',
   cardFixable: 'Fixable by patch',
   cardManual: 'Need a person',
   whatThisIs: 'What this report is',
-  clean: (files) =>
-    `Every check this tool can perform came back clean across ${pluralEn(files, 'file')}. That is a real ` +
+  clean: (scanned, unit) =>
+    `Every check this tool can perform came back clean across ${pluralEn(scanned, unit)}. That is a real ` +
     'result, and it is also a narrow one — read the next section before treating it as ' +
     'more than it is.',
-  found: (findings, files) =>
-    `${pluralEn(findings, 'finding')} across ${pluralEn(files, 'file')}. Each one names the file, the line, and the exact source ` +
-    'that triggered it, so every claim below can be checked in under a minute. Nothing ' +
-    'here is inferred from a screenshot or a score.',
+  found: (findings, scanned, unit) =>
+    `${pluralEn(findings, 'finding')} across ${pluralEn(scanned, unit)}. Each one names the ` +
+    `${unit}, the line, and the exact source that triggered it, so every claim below can ` +
+    'be checked in under a minute. Nothing here is inferred from a screenshot or a score.',
   caveatHead: 'This is not a conformance statement, and a clean run would not be one either.',
   caveatBody: (partial, total) =>
     `A11yFix reads source code. It checks ${partial} of the ${total} WCAG 2.2 A and AA ` +

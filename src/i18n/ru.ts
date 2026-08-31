@@ -19,7 +19,7 @@
  * it found.
  */
 
-import type { RuleText, UiStrings } from './types.js';
+import type { RuleText, UiStrings, Unit } from './types.js';
 import { GOST_NAME, gost, gostSection } from '../gost.js';
 
 /** Report chrome: everything the report writes about itself. */
@@ -30,23 +30,34 @@ export const UI_RU: UiStrings = {
   impactPlacement: 'group',
   // The level is Cyrillic here for the same reason it is in the criterion table: one
   // document should not write «уровень AA» in the header and «АА» four paragraphs down.
-  subline: (date: string, level: string, files: number, version: string): string =>
+  subline: (date: string, level: string, scanned: number, version: string, unit: Unit): string =>
     `${date} · WCAG 2.2 / ГОСТ Р 52872-2019, уровень ${level.replace(/A/g, 'А')} · ` +
-    `проверено: ${pluralRu(files, 'файл', 'файла', 'файлов')} · a11yfix ${version}`,
+    `проверено: ${
+      unit === 'page'
+        ? pluralRu(scanned, 'страница', 'страницы', 'страниц')
+        : pluralRu(scanned, 'файл', 'файла', 'файлов')
+    } · a11yfix ${version}`,
   cardErrors: 'Ошибки',
   cardWarnings: 'Предупреждения',
   cardFixable: 'Правится патчем',
   cardManual: 'Нужен человек',
   whatThisIs: 'Что это за отчёт',
-  clean: (files: number): string =>
-    `Все проверки, которые умеет делать этот инструмент, прошли чисто по ${pluralRu(files, 'файлу', 'файлам', 'файлам')}. ` +
+  clean: (scanned: number, unit: Unit): string =>
+    `Все проверки, которые умеет делать этот инструмент, прошли чисто по ${
+      unit === 'page'
+        ? pluralRu(scanned, 'странице', 'страницам', 'страницам')
+        : pluralRu(scanned, 'файлу', 'файлам', 'файлам')
+    }. ` +
     'Это настоящий результат — и одновременно узкий: прочитайте следующий раздел, прежде ' +
     'чем считать его чем-то большим.',
-  found: (findings: number, files: number): string =>
+  found: (findings: number, scanned: number, unit: Unit): string =>
     `Найдено: ${pluralRu(findings, 'находка', 'находки', 'находок')} ` +
-    `в ${pluralRu(files, 'файле', 'файлах', 'файлах')}. Для каждой находки указан файл, строка и точный ` +
-    'фрагмент исходника, который её вызвал, — любое утверждение ниже проверяется меньше ' +
-    'чем за минуту. Здесь нет ничего, выведенного из скриншота или из общей оценки.',
+    (unit === 'page'
+      ? `на ${pluralRu(scanned, 'странице', 'страницах', 'страницах')}. Для каждой находки указан адрес страницы, `
+      : `в ${pluralRu(scanned, 'файле', 'файлах', 'файлах')}. Для каждой находки указан файл, `) +
+    'строка и точный фрагмент исходника, который её вызвал, — любое утверждение ниже ' +
+    'проверяется меньше чем за минуту. Здесь нет ничего, выведенного из скриншота или из ' +
+    'общей оценки.',
   caveatHead: 'Это не заявление о соответствии, и чистый прогон им бы тоже не был.',
   caveatBody: (partial: number, total: number): string =>
     `A11yFix читает исходный код. Он затрагивает ${partial} из ${total} критериев успеха ` +

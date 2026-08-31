@@ -3,6 +3,7 @@ import { ALL_RULES } from './rules/index.js';
 import { CRITERIA, criterion, criterionUrl } from './wcag.js';
 import { countByFixClass } from './fix/classify.js';
 import type { Lang, Strings } from './i18n/index.js';
+import type { Unit } from './i18n/types.js';
 import { strings } from './i18n/index.js';
 
 /**
@@ -282,11 +283,15 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   w(`<style>${STYLE}</style>`);
   w('</head><body><div class="wrap">');
 
+  // A run that read URLs scanned pages, not files, and calling them files in a document
+  // handed to the site's owner describes something they do not have and cannot check.
+  const unit: Unit = (options.fetched ?? []).length > 0 ? 'page' : 'file';
+
   w('<header>');
   w(`<h1>${escapeHtml(t.ui.subject(options.subject))}</h1>`);
   w(
     `<p class="sub">${escapeHtml(
-      t.ui.subline(date, options.level, summary.files.length, options.toolVersion),
+      t.ui.subline(date, options.level, summary.files.length, options.toolVersion, unit),
     )}</p>`,
   );
   w('</header>');
@@ -302,9 +307,9 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
 
   w(`<h2>${escapeHtml(t.ui.whatThisIs)}</h2>`);
   if (shown.length === 0) {
-    w(`<p>${escapeHtml(t.ui.clean(summary.files.length))}</p>`);
+    w(`<p>${escapeHtml(t.ui.clean(summary.files.length, unit))}</p>`);
   } else {
-    w(`<p>${escapeHtml(t.ui.found(shown.length, filesWithFindings))}</p>`);
+    w(`<p>${escapeHtml(t.ui.found(shown.length, filesWithFindings, unit))}</p>`);
   }
 
   w('<div class="note">');
