@@ -11,11 +11,11 @@ Measured on 2026-08-31 with a11yfix 0.1.0.
 
 | Repository | Commit | Files | Errors | Warnings | Info | Time |
 |---|---|---|---|---|---|---|
-| `vercel/commerce` | `3761e52` | 45 | 4 | 1 | 1 | 0.08s |
+| `vercel/commerce` | `3761e52` | 45 | 4 | 0 | 2 | 0.08s |
 | `tailwindlabs/tailwindcss.com` | `bd868a3` | 150 | 26 | 14 | 7 | 0.21s |
 | `documenso/documenso` | `5082b47` | 674 | 52 | 14 | 3 | 0.38s |
-| `calcom/cal.com` | `176037d` | 989 | 828 | 542 | 12 | 0.59s |
-| `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 71 | 357 | 1.32s |
+| `calcom/cal.com` | `176037d` | 989 | 828 | 287 | 267 | 0.59s |
+| `shadcn-ui/ui` | `b4a618b` | 3334 | 100 | 65 | 363 | 1.32s |
 
 These are well-built projects by people who care. The point of the table is not that they
 are bad; it is that the numbers are small, which is what a precision-tuned tool should
@@ -193,20 +193,21 @@ near-clean result.
 
 | Site | Errors | Warnings | Info | Overlay | Total |
 |---|---|---|---|---|---|
-| `shm.ru` | 158 | 94 | 112 | 4 | 364 |
-| `spbu.ru` | 178 | 10 | 66 | 2 | 254 |
-| `rsl.ru` | 129 | 18 | 67 | — | 214 |
-| `obrnadzor.gov.ru` | 77 | 58 | 63 | — | 198 |
-| `nlr.ru` | 34 | 52 | 34 | 2 | 120 |
-| `tretyakovgallery.ru` | 40 | 21 | 48 | — | 109 |
-| `rusmuseum.ru` | 10 | 14 | 18 | — | 42 |
-| `libnn.ru` | 24 | 13 | 5 | — | 42 |
+| `shm.ru` | 158 | 2 | 204 | 4 | 364 |
+| `spbu.ru` | 178 | 1 | 75 | 2 | 254 |
+| `rsl.ru` | 129 | 5 | 80 | — | 214 |
+| `obrnadzor.gov.ru` | 77 | 12 | 109 | — | 198 |
+| `nlr.ru` | 34 | 4 | 82 | 2 | 120 |
+| `tretyakovgallery.ru` | 40 | 1 | 68 | — | 109 |
+| `rusmuseum.ru` | 10 | 5 | 27 | — | 42 |
+| `libnn.ru` | 24 | 7 | 11 | — | 42 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1345 total with the same suspicion the cal.com row deserves. 243 of the warnings
-are `target="_blank"` without `rel="noopener"` and 230 of the info findings are a new
-window opened without warning — conventions, and on this evidence near-universal ones.
-Strip those and 872 remain, of which the load-bearing part is:
+Read the 1345 total with the same suspicion the cal.com row deserves. 243 findings are
+`target="_blank"` without `rel="noopener"` and 230 are a new window opened without
+warning — conventions, and on this evidence near-universal ones. Both are reported as
+information rather than as faults, for exactly that reason. Strip them and 872 remain, of
+which the load-bearing part is:
 
 - **238 pieces of text** below the contrast their size requires;
 - **172 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (122);
@@ -261,11 +262,17 @@ three hundred and ten it lists, taken at an even stride across the list:
 npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
 ```
 
-**5774 findings across 48 pages** — 3080 errors, 1424 warnings, 1270 info — in
+**5774 findings across 48 pages** — 3080 errors, 62 warnings, 2632 info — in
 twenty-six seconds, including the fetching. Five rules account for 4018 of them:
 1362 links opening a new window with no `rel`, 782 links with no discernible text,
 649 placeholder `alt`s, 617 unannounced new windows, 608 images with no `alt` at all.
 Sixteen other rules divide the remaining 1756 between them.
+
+Two of those five are conventions rather than barriers and are reported as information,
+which is what makes the report's own headline 3142 rather than 5774. That distinction was
+made here, on this measurement: `rel="noopener"` was a warning until 1362 of a museum's
+findings turned out to be it — a quarter of an accessibility audit spent on a token with
+no WCAG criterion behind it, which every browser has implied by default since early 2021.
 
 Two things about that number are worth stating plainly, because both cut against it.
 

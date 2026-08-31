@@ -528,13 +528,27 @@ const rawUrlLinkText: Rule = {
   },
 };
 
+/**
+ * Hardening, reported as information rather than as a fault.
+ *
+ * Every major browser has implied `noopener` for `target="_blank"` since early 2021
+ * (Safari 12.1, Firefox 79, Chrome and Edge 88), so on anything current the handle this
+ * rule is about is already severed. What is left is real but narrow: engines older than
+ * that, and embedded webviews, where the opened page can still navigate this one.
+ *
+ * It was a warning, and on a museum's site that made it 1362 of 5774 findings — 24% of an
+ * accessibility audit spent on a token with no WCAG criterion behind it, described with
+ * an impact sentence that has been wrong on every current browser for five years. A
+ * reader who knows that discounts the rest of the report, and should. Information is what
+ * it is: worth writing, not worth counting as a barrier.
+ */
 const blankTargetRel: Rule = {
   id: 'A11Y-LINK-004',
   title: 'target="_blank" without rel="noopener"',
   wcag: [],
   level: 'A',
-  severity: 'warning',
-  summary: 'A link opening a new tab hands the new page a reference back to this one.',
+  severity: 'info',
+  summary: 'A link opening a new tab leaves the handle back to this page to the browser default.',
   appliesTo: ['html', 'jsx', 'vue', 'svelte'],
   run(ctx) {
     const jsx = isJsxFile(ctx);
@@ -568,7 +582,7 @@ const blankTargetRel: Rule = {
           ? 'Link opens a new browsing context with target="_blank" and has no rel attribute.'
           : `Link opens a new browsing context with target="_blank" and rel="${truncate(rel.value ?? '', 40)}" does not include noopener.`;
       const impact =
-        'The page that opens keeps a live window.opener handle to this one and can navigate it to a look-alike login page while the user is reading the new tab. In older engines both documents also share a thread, so a slow new tab freezes scrolling and keyboard focus here.';
+        'Every major browser has implied noopener for target="_blank" since early 2021, so on a current one this is already closed. Older engines and embedded webviews do not: there the opened page keeps a live window.opener handle and can navigate this tab to a look-alike login page while the user reads the new one. Writing the token states the intent instead of relying on the user agent. This is hardening rather than a barrier for assistive technology, which is why it is reported as information.';
 
       const span = { start: el.openStart, end: el.openEnd };
 

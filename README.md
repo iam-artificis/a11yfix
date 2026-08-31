@@ -348,11 +348,11 @@ Measured against public repositories at the time of writing:
 
 | Repository | Files | Errors | Warnings |
 |---|---|---|---|
-| `vercel/commerce` | 45 | 4 | 1 |
+| `vercel/commerce` | 45 | 4 | 0 |
 | `tailwindlabs/tailwindcss.com` | 150 | 26 | 14 |
 | `documenso/documenso` | 674 | 52 | 14 |
-| `calcom/cal.com` | 989 | 828 | 542 |
-| `shadcn-ui/ui` | 3334 | 100 | 71 |
+| `calcom/cal.com` | 989 | 828 | 287 |
+| `shadcn-ui/ui` | 3334 | 100 | 65 |
 
 Getting there meant fixing five classes of confident, wrong finding that only real code
 produced — a discarded Tailwind opacity modifier reading `bg-green-500/10` as solid
