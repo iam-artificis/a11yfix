@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMarkup, getAttr, hasAttr, textOf, positionAt } from '../dist/parse/markup.js';
 import { parseSelector } from '../dist/design/selector.js';
+import { analyseSource } from '../dist/engine.js';
+import { ALL_RULES } from '../dist/rules/index.js';
 import {
   parseCss,
   parseInlineStyle,
@@ -290,4 +292,69 @@ test('familyOf reads the colour family off a utility class', () => {
   assert.equal(familyOf('border-slate-200'), 'slate');
   assert.equal(familyOf('flex'), undefined);
   assert.equal(familyOf('text-white'), undefined);
+});
+
+/**
+ * Character references are decoded, not blanked.
+ *
+ * `textOf` replaced `&[a-z]+;` with a space, which makes two spellings of one character
+ * disagree about whether an element has any text. obrnadzor.gov.ru serves
+ * `<button class="swipe-btn prev">&lt;</button>`, and the report said it "has no text
+ * content" — a sentence anyone can falsify by opening the page.
+ */
+
+const analyse = (source) =>
+  analyseSource('page.html', source, { rules: ALL_RULES, level: 'AA', fixThreshold: null });
+const doc = (body) =>
+  `<!DOCTYPE html><html lang="ru"><head><title>т</title></head><body><main><h1>з</h1>${body}</main></body></html>`;
+const ids = (body) => analyse(doc(body)).violations.map((v) => v.ruleId);
+
+test('three spellings of one character agree about whether a button has a name', () => {
+  const answers = ['&times;', '\u00d7', '&#215;', '&#xD7;'].map((text) =>
+    ids(`<button type="button">${text}</button>`).includes('A11Y-FORM-004'),
+  );
+  assert.deepEqual(
+    answers,
+    [false, false, false, false],
+    'a button whose text is a visible character has a name, however it is written',
+  );
+});
+
+test('the live case: a pager button whose text is an escaped angle bracket', () => {
+  assert.ok(!ids('<button class="swipe-btn prev">&lt;</button>').includes('A11Y-FORM-004'));
+});
+
+test('a button holding nothing but whitespace references is still nameless', () => {
+  // What shm.ru's forty-odd unnamed close buttons depend on. Decoding &nbsp; to U+00A0
+  // preserves this, because JavaScript's trim() treats it as whitespace.
+  for (const blank of ['&nbsp;', '&ensp;&emsp;', '&#160;', '   ']) {
+    assert.ok(
+      ids(`<button type="button">${blank}</button>`).includes('A11Y-FORM-004'),
+      `"${blank}" is not a name`,
+    );
+  }
+});
+
+test('a reference the table does not know is left alone rather than blanked', () => {
+  // Erring toward "this element has text" is the direction that stays quiet.
+  assert.ok(!ids('<button type="button">&notarealentity;</button>').includes('A11Y-FORM-004'));
+});
+
+test('decoding happens after tags come out, not before', () => {
+  // `&lt;div&gt;` decoded first would become `<div>` and be stripped as markup the author
+  // never wrote, taking the button's only text with it.
+  assert.ok(!ids('<button type="button">&lt;div&gt;</button>').includes('A11Y-FORM-004'));
+});
+
+test('a numeric reference for a lone surrogate is not turned into one', () => {
+  // Half a character in a client-facing report line is worse than the escape itself.
+  const found = analyse(doc('<button type="button">&#55296;</button>')).violations;
+  for (const v of found) {
+    assert.ok(!/[\uD800-\uDFFF]/.test(v.excerpt), 'no lone surrogate may reach an excerpt');
+  }
+});
+
+test('a paginated link written with entity arrows is not empty', () => {
+  // &laquo;/&raquo; pagers are ordinary Russian CMS output.
+  assert.ok(!ids('<a href="/page/2/">&raquo;</a>').includes('A11Y-LINK-001'));
 });

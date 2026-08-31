@@ -151,3 +151,26 @@ test('the sample report shows the widget the sample page has', async () => {
   const found = overlays('demo/uchrezhdenie.ru.html', source);
   assert.equal(found.length, 1, 'the fixture is the report shown to buyers; it must demonstrate this');
 });
+
+test('a site\'s own low-vision page is not evidence that it installed a widget', () => {
+  // "для слабовидящих" transliterates to a path containing the substring "slabovid", so
+  // every Russian institution's canonical link matched a vendor name. This reported a
+  // widget on pages that have none.
+  const canonical = '<link rel="canonical" href="https://shm.ru/dostupnyy-muzey/dlyaslabovidyashchikh/">';
+  assert.deepEqual(overlays('p.html', page('<p>т</p>', canonical)), []);
+  const alt = '<link rel="alternate" hreflang="ru" href="/dlyaslabovidyashchikh/">';
+  assert.deepEqual(overlays('p.html', page('<p>т</p>', alt)), []);
+});
+
+test('the vendor at slabovid.ru is still found', () => {
+  // The other half: dropping the name entirely would have lost a real vendor.
+  const found = overlays('p.html', page('<p>т</p>', '<script src="https://slabovid.ru/widget/v2/w.js"></script>'));
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /URL contains/);
+});
+
+test('a stylesheet link is still read', () => {
+  // The rel filter must not switch the rule off for the way overlays actually arrive.
+  const css = '<link rel="stylesheet" href="/local/templates/new-gim/css/bvi.min.css">';
+  assert.equal(overlays('p.html', page('<p>т</p>', css)).length, 1);
+});

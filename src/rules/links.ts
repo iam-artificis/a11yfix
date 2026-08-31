@@ -1012,9 +1012,17 @@ const anchorAsButton: Rule = {
           message: actsAsButton
             ? `Anchor with href="${truncate(value.trim(), 30)}"${handler ? ' and a click handler' : ''} is a button written as a link${rolePatched ? ' with role="button" bolted on' : ''}.`
             : `Anchor with href="${truncate(value.trim(), 30)}" and no handler goes nowhere.`,
+          // Two hrefs reach this branch and they do different things. `#` scrolls to the
+          // top of the document; a `javascript:` URL whose script result is not a string
+          // navigates nowhere at all. Saying "leads back to the top" about both also
+          // contradicted the message directly above it, which says "goes nowhere" — and
+          // the live instance was an nlr.ru link titled «наверх», where a reader checking
+          // one sentence against the other finds the report arguing with itself.
           impact: actsAsButton
             ? 'A screen reader announces "link" and promises navigation that never happens; the link also appears in the page\'s link list, where it leads nowhere. Unlike a button it ignores the Space key, so a keyboard user who presses Space scrolls the page instead of activating the control.'
-            : 'The link appears in a screen reader\'s list of links on the page and leads back to the top of it. A user navigating by link list has to try it to find that out.',
+            : value.trim() === '#'
+              ? 'The link appears in a screen reader\'s list of links on the page and leads back to the top of it. A user navigating by link list has to try it to find that out.'
+              : 'The link appears in a screen reader\'s list of links on the page and does not navigate at all. A user navigating by link list has to try it to find that out.',
           fix: {
             // No edits and an advisory: this is a human's job, and calling it 'review'
             // would count it among the fixes `--fix --include-review` promises to write.

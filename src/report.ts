@@ -2,6 +2,24 @@ import type { RunSummary, Severity, Violation } from './types.js';
 import { ALL_RULES } from './rules/index.js';
 import { CRITERIA, criterion, criterionUrl } from './wcag.js';
 import { countByFixClass } from './fix/classify.js';
+
+/**
+ * How many success criteria this tool can actually report on.
+ *
+ * Counted from the rules, not from the `reach` field. Five criteria are marked `partial`
+ * in the table and cited by no rule in ALL_RULES — 1.4.2, 1.4.4, 2.1.4, 2.4.6 and 2.5.3 —
+ * so the report claimed 22 where docs/coverage.md, generated from the rule set, says 17
+ * and lists all five under "Nothing in A11yFix will ever report on them". The CLI points
+ * the reader at that file on every run.
+ *
+ * One sentence, in every report, inside the box headed «Это не заявление о соответствии» —
+ * the paragraph whose entire job is establishing that we do not overclaim.
+ * `gen-coverage.mjs` has had this guard all along; this was the only place in the
+ * codebase using `reach` without it.
+ */
+const CHECKED_CRITERIA = CRITERIA.filter(
+  (c) => c.reach === 'partial' && new Set(ALL_RULES.flatMap((r) => r.wcag)).has(c.sc),
+).length;
 import type { Lang, Strings } from './i18n/index.js';
 import type { Unit } from './i18n/types.js';
 import { strings } from './i18n/index.js';
@@ -315,9 +333,7 @@ export function renderReport(summary: RunSummary, options: ReportOptions): strin
   w('<div class="note">');
   w(
     `<p><strong>${escapeHtml(t.ui.caveatHead)}</strong> ` +
-      escapeHtml(
-        t.ui.caveatBody(CRITERIA.filter((c) => c.reach === 'partial').length, CRITERIA.length),
-      ) +
+      escapeHtml(t.ui.caveatBody(CHECKED_CRITERIA, CRITERIA.length)) +
       '</p>',
   );
   // caveatBody2 carries <code> tags, which are ours rather than the scanned source's.

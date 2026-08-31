@@ -1486,8 +1486,28 @@ const OVERLAY_ASSETS = [
   'accessiway',
   'maxaccess',
   'mibok',
-  'slabovid',
 ];
+
+/**
+ * The one vendor whose name is also a Russian word fragment.
+ *
+ * slabovid.ru is a real overlay vendor and its script must still be found. But bare
+ * `slabovid` as a substring also matches `dlyaslabovidyashchikh` — "для слабовидящих" —
+ * which is the path every Russian institution puts its low-vision page at. A site's own
+ * `<link rel="canonical" href="/dostupnyy-muzey/dlyaslabovidyashchikh/">` was therefore
+ * evidence that it had installed a widget, which is a finding that invents the thing it
+ * reports. Matched by domain, the same way BVI_ASSET is bounded so it cannot match
+ * `webvisor`.
+ */
+const SLABOVID_ASSET = /slabovid\.ru/;
+
+/**
+ * `rel` values on a <link> that actually load code or style into the page.
+ *
+ * Anything else — canonical, alternate, icon, manifest, preconnect — is metadata, and its
+ * href is a page address rather than an asset the browser executes.
+ */
+const LOADING_REL = new Set(['stylesheet', 'preload', 'modulepreload', 'prefetch']);
 
 /**
  * The bvi family, whose filenames vary — bvi.js, bvi.min.js, bvi.min.css, js/bvi/init.js.
@@ -1570,11 +1590,23 @@ const overlayWidget: Rule = {
       if (isComponent(el)) continue;
 
       if (el.tagLower === 'script' || el.tagLower === 'link') {
+        // Only a <link> that loads code or style can be an overlay. Every Russian
+        // institution's low-vision page lives at a path like /dlyaslabovidyashchikh/, so
+        // reading `href` off any <link> at all made a site's own
+        // `<link rel="canonical">` evidence that it had installed a widget — a finding
+        // that invents the thing it reports. BVI_ASSET was written as /bvi[.\-\/]/
+        // precisely so it would not match `webvisor`; the same care had not been taken
+        // here.
+        if (el.tagLower === 'link' && !LOADING_REL.has((literalAttr(el, 'rel') ?? '').trim().toLowerCase())) {
+          continue;
+        }
         const url = (literalAttr(el, 'src') ?? literalAttr(el, 'href') ?? '').toLowerCase();
         const hit =
           url === ''
             ? undefined
-            : (OVERLAY_ASSETS.find((m) => url.includes(m)) ?? BVI_ASSET.exec(url)?.[0]);
+            : (OVERLAY_ASSETS.find((m) => url.includes(m)) ??
+              BVI_ASSET.exec(url)?.[0] ??
+              SLABOVID_ASSET.exec(url)?.[0]);
         if (hit !== undefined) report(el, `A <${el.tagLower}> whose URL contains "${hit}"`);
         continue;
       }

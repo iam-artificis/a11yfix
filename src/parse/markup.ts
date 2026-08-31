@@ -606,15 +606,87 @@ export function hasAttr(el: Element, name: string): boolean {
  * Used to decide whether a control has an accessible name from its own content.
  */
 export function textOf(el: Element): string {
-  return el.innerSource
-    // Script and style bodies are not visible text; leaving them in would let a
-    // stylesheet or a click handler masquerade as an element's accessible name.
-    .replace(new RegExp("<(script|style)\\b[^>]*>[\\s\\S]*?</\\1>", 'gi'), ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\{[^}]*\}/g, ' ')
-    .replace(/&[a-z]+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    decodeReferences(
+      el.innerSource
+        // Script and style bodies are not visible text; leaving them in would let a
+        // stylesheet or a click handler masquerade as an element's accessible name.
+        .replace(new RegExp("<(script|style)\\b[^>]*>[\\s\\S]*?</\\1>", 'gi'), ' ')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\{[^}]*\}/g, ' '),
+      // Decoded after the tags come out, never before: `&lt;div&gt;` would otherwise
+      // become `<div>` and be stripped as markup the author never wrote.
+    )
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/**
+ * Named character references, decoded rather than blanked.
+ *
+ * `textOf` used to replace `&[a-z]+;` with a space, which makes two spellings of one
+ * character disagree about whether an element has any text: `<button>&times;</button>`
+ * was reported as having none while `<button>×</button>` and `<button>&#215;</button>`
+ * were fine. obrnadzor.gov.ru serves `<button class="swipe-btn prev">&lt;</button>`, and
+ * because the excerpt is cut at the opening tag the report printed the tag and never
+ * showed the `&lt;` that contradicts the sentence beneath it.
+ *
+ * Whitespace references are decoded to real whitespace rather than being special-cased,
+ * and that preserves every behaviour the old blanking gave us: JavaScript's `\s` and
+ * `String.prototype.trim` both treat U+00A0 as whitespace, so a button holding nothing
+ * but `&nbsp;` still comes out empty — which is what shm.ru's forty-odd unnamed close
+ * buttons depend on.
+ *
+ * A reference this table does not know is left exactly as written. That errs toward
+ * "this element has text", which is the direction that stays quiet rather than the one
+ * that invents a finding.
+ */
+const NAMED_REFERENCES: Readonly<Record<string, string>> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  nbsp: '\u00a0', ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', shy: '\u00ad',
+  zwj: '\u200d', zwnj: '\u200c',
+  mdash: '—', ndash: '–', minus: '−', horbar: '―',
+  laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', bdquo: '„',
+  hellip: '…', middot: '·', bull: '•', sect: '§', para: '¶',
+  dagger: '†', Dagger: '‡', prime: '′', Prime: '″',
+  times: '×', divide: '÷', deg: '°', plusmn: '±',
+  ne: '≠', le: '≤', ge: '≥', infin: '∞',
+  copy: '©', reg: '®', trade: '™',
+  euro: '€', pound: '£', yen: '¥', cent: '¢', curren: '¤',
+  larr: '←', uarr: '↑', rarr: '→', darr: '↓', harr: '↔',
+  crarr: '↵', lArr: '⇐', rArr: '⇒',
+  sup1: '¹', sup2: '²', sup3: '³',
+  frac12: '½', frac14: '¼', frac34: '¾',
+  iexcl: '¡', iquest: '¿', ordm: 'º', ordf: 'ª',
+  szlig: 'ß', auml: 'ä', ouml: 'ö', uuml: 'ü',
+  Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü',
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', aring: 'å',
+  aelig: 'æ', ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê',
+  igrave: 'ì', iacute: 'í', ntilde: 'ñ', ograve: 'ò', oacute: 'ó',
+  oslash: 'ø', ugrave: 'ù', uacute: 'ú', yacute: 'ý',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', pi: 'π',
+  sigma: 'σ', omega: 'ω', mu: 'µ',
+};
+
+/** Highest code point Unicode defines; anything past it is not a character. */
+const MAX_CODE_POINT = 0x10ffff;
+
+/** Decode numeric and known named character references, leaving anything else alone. */
+export function decodeReferences(text: string): string {
+  if (!text.includes('&')) return text;
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body: string) => {
+    if (body.charCodeAt(0) === 0x23) {
+      const hex = body[1] === 'x' || body[1] === 'X';
+      const cp = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+      // A lone surrogate is not a character and would put a broken one in a report line.
+      if (!Number.isFinite(cp) || cp <= 0 || cp > MAX_CODE_POINT) return whole;
+      if (cp >= 0xd800 && cp <= 0xdfff) return whole;
+      return String.fromCodePoint(cp);
+    }
+    return NAMED_REFERENCES[body] ?? NAMED_REFERENCES[body.toLowerCase()] ?? whole;
+  });
 }
 
 /** 1-indexed line and column for an offset. */

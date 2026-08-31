@@ -1334,7 +1334,19 @@ const formWithoutSubmit: Rule = {
       if (hasSubmit) continue;
 
       // A form with no fields at all is a wrapper, not a form to submit.
-      if (!kids.some(isFormControl)) continue;
+      //
+      // `isFormControl` tests the tag name only; every other rule that matters pairs it
+      // with NON_FIELD_INPUT_TYPES, and this one did not. nlr.ru's `<form id="searchForm">`
+      // holds four hidden inputs and nothing else — a parameter carrier the visible
+      // sibling form submits by script — and got "contains fields but no submit button"
+      // under an impact paragraph about the Enter key, textareas, switch access and
+      // on-screen keyboards, none of which can apply to a form with nothing in it. The
+      // discontinuity is the tell: an empty <form> was correctly skipped, and adding one
+      // hidden input flipped it to a warning.
+      const visibleField = (d: Element): boolean =>
+        isFormControl(d) &&
+        !(d.tagLower === 'input' && NON_FIELD_INPUT_TYPES.has(inputType(d) ?? ''));
+      if (!kids.some(visibleField)) continue;
 
       out.push(
         ctx.report({
