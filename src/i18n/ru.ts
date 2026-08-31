@@ -60,8 +60,11 @@ export const UI_RU: UiStrings = {
     'общей оценки.',
   caveatHead: 'Это не заявление о соответствии, и чистый прогон им бы тоже не был.',
   caveatBody: (partial: number, total: number): string =>
+    // «А и АА» in Cyrillic, like the header and the criterion table. The rule two dozen
+    // lines up says one document must not spell the level two ways; this line was the
+    // document breaking it.
     `A11yFix читает исходный код. Он затрагивает ${partial} из ${total} критериев успеха ` +
-    'WCAG 2.2 уровней A и AA — и ни один из них полностью.',
+    'WCAG 2.2 уровней А и АА — и ни один из них полностью.',
   caveatBody2:
     'Он может доказать, что у изображения нет атрибута <code>alt</code>. Он не может ' +
     'судить, описывает ли изображение тот <code>alt</code>, который есть. Порядок обхода ' +
@@ -120,8 +123,12 @@ export const UI_RU: UiStrings = {
   line: 'строка',
   excerptNow: 'сейчас',
   excerptAfter: 'после правки',
+  // The one string in this file that used to inline its own plural test, and the only one
+  // that got it wrong: 2, 3 and 4 need the second form, and «Ещё 2 вхождений» is the kind
+  // of mistake a Russian reader notices in the first paragraph of a document they paid
+  // for. pluralRu is right across 1/2/5/11/21/111 and is tested; use it.
   more: (n: number): string =>
-    `Ещё ${n} ${n % 10 === 1 && n % 100 !== 11 ? 'вхождение' : 'вхождений'} не перечислено. ` +
+    `Ещё ${pluralRu(n, 'вхождение', 'вхождения', 'вхождений')} не перечислено. ` +
     'Запустите с <code>--all</code>, чтобы получить отчёт со всеми.',
   hidden: (n: string): string =>
     `Не показано: ${n}. Это соглашения и подсказки, а не барьеры; запустите с ` +
@@ -195,6 +202,14 @@ export const RULE_TEXT_RU: Readonly<Record<string, RuleText>> = {
       'странице каталога с полусотней.',
     patch: 'Убирает вводные слова из начала alt, оставляя само описание.',
     manual: 'Уберите вводные слова из начала alt: описание должно начинаться с сути.',
+    manualByReason: {
+      // «Изображение слайдера» и «Фото баннера» — это весь alt целиком. Убирать тут
+      // нечего: убрав вводные слова, мы получим alt="", то есть утверждение, что
+      // картинка декоративная. Такое решение принимает человек, а не программа.
+      'nothing-left':
+        'Здесь alt состоит только из вводных слов — описания нет вовсе. Напишите, что ' +
+        'изображено на картинке, или поставьте alt="", если она декоративная.',
+    },
   },
   'A11Y-IMG-004': {
     title: 'У кнопки-изображения нет alt',

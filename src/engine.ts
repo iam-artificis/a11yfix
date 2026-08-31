@@ -50,7 +50,14 @@ const EXCERPT_WINDOW = 160;
 
 function tidy(raw: string): string {
   const cleaned = raw.replace(new RegExp('[\\u0000-\\u001f\\u007f]', 'g'), '').replace(/\s+/g, ' ').trim();
-  return cleaned.length > 120 ? cleaned.slice(0, 119) + '…' : cleaned;
+  if (cleaned.length <= 120) return cleaned;
+  // Not between the halves of a surrogate pair. `slice` counts UTF-16 units, so a cut
+  // inside an emoji leaves a lone surrogate, and the excerpt is the part of a finding a
+  // client reads most closely — it is the evidence.
+  let cut = 119;
+  const last = cleaned.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut--;
+  return cleaned.slice(0, cut) + '…';
 }
 
 /** Trim an excerpt and neutralise control characters so printing a report is safe. */

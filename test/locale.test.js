@@ -231,3 +231,102 @@ test('the same page with the faults put back is still caught, in every writing s
     }
   }
 });
+
+/**
+ * The vocabulary tables have to survive the same normalisation the page text does.
+ *
+ * `normalizeText` decomposes to NFD and strips combining marks, which turns «й» into «и»
+ * and «ё» into «е». Page text went through it and the tables did not, so every entry
+ * containing either letter was unreachable: «перейти» could not match «Перейти», and
+ * «новой вкладке» could not match a link that announced the new tab in exactly those
+ * words — a false positive, not merely a miss.
+ */
+
+const runRu = (body) =>
+  analyseSource(
+    'page.html',
+    `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Тест</title></head>` +
+      `<body><main><h1>Заголовок</h1>${body}</main></body></html>`,
+    { rules: ALL_RULES, level: 'AA', fixThreshold: null },
+  ).violations;
+
+test('generic link text spelled with й is recognised', () => {
+  const found = runRu('<a href="/x/">Перейти</a>').filter((v) => v.ruleId === 'A11Y-LINK-002');
+  assert.equal(found.length, 1, '«Перейти» is as empty a link name as «click here»');
+});
+
+test('the same entries still match after the ё-to-е collapse', () => {
+  for (const text of ['Ещё', 'Еще', 'Подробнее', 'Читать далее']) {
+    assert.equal(
+      runRu(`<a href="/x/">${text}</a>`).filter((v) => v.ruleId === 'A11Y-LINK-002').length,
+      1,
+      `${text} should be recognised however it is spelled`,
+    );
+  }
+});
+
+test('a link that announces its new tab in Russian is not accused of hiding it', () => {
+  for (const text of [
+    'Отчёт (откроется в новой вкладке)',
+    'Архив — откроется в новом окне',
+    'Каталог, другой сайт',
+  ]) {
+    assert.equal(
+      runRu(`<a href="/x/" target="_blank">${text}</a>`).filter((v) => v.ruleId === 'A11Y-LINK-005')
+        .length,
+      0,
+      `${text} says the thing the rule asks for`,
+    );
+  }
+});
+
+test('and one that says nothing about it still is', () => {
+  const found = runRu('<a href="/x/" target="_blank">Отчёт за 2025 год</a>');
+  assert.equal(found.filter((v) => v.ruleId === 'A11Y-LINK-005').length, 1);
+});
+
+
+/**
+ * A11Y-FORM-008 reads the page, not the file.
+ *
+ * Two faults in one line. The legend it looked for was English-only, so a Russian form
+ * saying «* — обязательные поля» directly above the field was told its asterisk was
+ * unexplained. And it looked for that legend in the raw source, where a CSS attribute
+ * selector — `[class*="cell"]` in a single inline <style> — matches the "* =" form and
+ * switched the rule off for the whole document. Five of the ninety-two audited pages did
+ * exactly that, and the symptom was silence, which is why nobody noticed.
+ */
+
+const asteriskForm = (legend, head = '') =>
+  analyseSource(
+    'page.html',
+    `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Тест</title>${head}</head>` +
+      `<body><main><h1>Заголовок</h1><form><p>${legend}</p>` +
+      `<label for="a">Имя *</label><input id="a" required>` +
+      `<button type="submit">Отправить</button></form></main></body></html>`,
+    { rules: ALL_RULES, level: 'AA', fixThreshold: null },
+  ).violations.filter((v) => v.ruleId === 'A11Y-FORM-008');
+
+test('a Russian legend explains the asterisk', () => {
+  for (const legend of [
+    '* — обязательные поля',
+    'Поля, отмеченные *, обязательны для заполнения',
+    'Звёздочкой отмечены обязательные поля',
+    'Звездочкой отмечены обязательные поля',
+    '* — поле, обязательное к заполнению',
+  ]) {
+    assert.equal(asteriskForm(legend).length, 0, `«${legend}» explains it`);
+  }
+});
+
+test('a form with no legend at all is still reported', () => {
+  assert.equal(asteriskForm('Заполните форму').length, 1);
+});
+
+test('a stylesheet selector is not an explanation anybody can read', () => {
+  assert.equal(
+    asteriskForm('Заполните форму', '<style>[class*="cell"]{color:red}</style>').length,
+    1,
+    'the * = in a CSS attribute selector must not count as a legend',
+  );
+});

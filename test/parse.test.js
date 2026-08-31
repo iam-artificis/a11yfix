@@ -246,7 +246,26 @@ test('bold detection follows the CSS keywords, not just numbers', () => {
   assert.equal(isBoldWeight('bolder'), true);
   assert.equal(isBoldWeight('600'), false);
   assert.equal(isBoldWeight('normal'), false);
-  assert.equal(isBoldWeight(''), false);
+  assert.equal(isBoldWeight('lighter'), false);
+});
+
+test('a weight we cannot decide is undefined, which is not the same as normal', () => {
+  // Returning false here is worse than saying nothing: it stops the inheritance walk, so
+  // a span reading `font-weight: inherit` inside a bold heading counted as normal weight
+  // and was held to 4.5:1 when 3:1 was the threshold that applied to it.
+  for (const value of ['inherit', 'unset', 'revert', 'var(--w)', 'calc(400 + 300)', '']) {
+    assert.equal(isBoldWeight(value), undefined, `${value} is not decidable here`);
+  }
+});
+
+test('the !important flag never reaches the weight test', () => {
+  // The declaration parser strips it and records it separately, so 'bold !important'
+  // arrives as 'bold'. This is the parse, not the string, so the guarantee is checked
+  // where it is made.
+  const [d] = parseCss('.a{font-weight:bold !important}').rules[0].declarations;
+  assert.equal(d.value, 'bold');
+  assert.equal(d.important, true);
+  assert.equal(isBoldWeight(d.value), true);
 });
 
 test('Tailwind colour tokens resolve to the palette', () => {
@@ -470,4 +489,29 @@ test('items with implied ends are siblings, not a chain of ancestors', () => {
     assert.equal(li.depth, list.depth + 1, 'and sits one level below it');
   }
   assert.equal(list.children.length, 3, 'the list has three children, not one');
+});
+
+test('@layer does not make the rules inside it conditional', () => {
+  // Tailwind v4 emits the whole design system inside @layer. Treating that as a condition
+  // marks every rule "might not apply" and leaves a modern build with no readable colours
+  // at all. @layer changes which cascade layer a rule sits in, not whether it applies.
+  const { rules } = parseCss('@layer base { .a { color: #111111 } } @media print { .b { color: #222222 } }');
+  const a = rules.find((r) => r.selector === '.a');
+  const b = rules.find((r) => r.selector === '.b');
+  assert.deepEqual(a.conditions, [], '@layer is not a condition');
+  assert.equal(b.conditions.length, 1, '@media still is');
+});
+
+test('a rule nested in both keeps only the condition that is one', () => {
+  const { rules } = parseCss('@layer u { @media (min-width: 40rem) { .c { color: #333333 } } }');
+  const c = rules.find((r) => r.selector === '.c');
+  assert.equal(c.conditions.length, 1);
+  assert.match(c.conditions[0], /@media/);
+});
+
+test('the group stack still balances when layers nest', () => {
+  const { rules } = parseCss('@layer a { @layer b { .x { color: #000000 } } } .y { color: #ffffff }');
+  const y = rules.find((r) => r.selector === '.y');
+  assert.ok(y !== undefined, 'a rule after two closed layers is still found');
+  assert.deepEqual(y.conditions, []);
 });

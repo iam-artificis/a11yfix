@@ -755,3 +755,69 @@ test('a genuinely empty link is still reported', () => {
   const src = clean('<a href="/news/1/"><div class="card"></div></a>');
   assert.ok(idsIn(src).includes('A11Y-LINK-001'), 'the rule must still fire when nothing names the link');
 });
+
+/**
+ * A11Y-IMG-003 in Russian.
+ *
+ * The rule's Russian summary has always said it catches alt text beginning «изображение»
+ * or «фото». The regex behind it was English-only, so www.rsl.ru's fifteen images
+ * described as «Изображение новости …» and meloman.ru's sixty-two «Изображение слайдера»
+ * went unreported — the largest confirmed thing this tool was missing rather than
+ * inventing. English marks the relation with a preposition; Russian marks it with the
+ * genitive, which we cannot read, so the second word has to be one we recognise.
+ */
+
+const prefixFindings = (alt) =>
+  run('page.html', withImage(`alt="${alt}"`)).violations.filter(
+    (v) => v.ruleId === 'A11Y-IMG-003',
+  );
+
+test('the live case: alt text that names the medium and the CMS slot', () => {
+  const found = prefixFindings('Изображение новости Афиша на сентябрь 2026 года');
+  assert.equal(found.length, 1);
+  assert.match(
+    found[0].fix.description,
+    /Афиша на сентябрь 2026 года/,
+    'the fix strips the container word too, or it leaves a genitive fragment',
+  );
+});
+
+test('the whole boilerplate goes, never just the first word', () => {
+  // «Изображение» alone off the front leaves «новости Афиша…», which is not Russian.
+  // Matching medium and container together is what makes the rewrite safe to offer.
+  const found = prefixFindings('Изображение новости Хранители фондов');
+  assert.match(found[0].fix.description, /alt="Хранители фондов"/);
+});
+
+test('an alt that is nothing but boilerplate gets advice, not a rewrite', () => {
+  const found = prefixFindings('Изображение слайдера');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].fix.safety, 'manual', 'deleting it would assert the image is decorative');
+  assert.ok(
+    !/opens with "Изображение слайдера"/.test(found[0].message),
+    'the message must not say the text opens with the whole of itself',
+  );
+});
+
+test('a title that happens to begin with the same word is left alone', () => {
+  // The reason the second word is checked at all. Russian has no "of" to key on, and a
+  // museum's «Изображение Богоматери» is the icon's actual name, not a description of the
+  // file format. Reporting it would be exactly the kind of invented finding that
+  // discredits the true ones printed beside it.
+  for (const alt of [
+    'Изображение Богоматери',
+    'Фотовыставка «Сохраняя археологическое наследие»',
+    'Фотография Анны Ахматовой',
+    'фото для раздела Оружейная палата',
+  ]) {
+    assert.equal(prefixFindings(alt).length, 0, `${alt} must not be reported`);
+  }
+});
+
+test('the container word is matched at its end, which \b cannot do in Cyrillic', () => {
+  // JavaScript's \b is defined over ASCII word characters even under the /u flag, so
+  // there is no boundary after «новости» and the first version of this matched nothing
+  // at all on the corpus it was written for.
+  assert.equal(prefixFindings('Изображение новостийного блока').length, 0, 'not a container word');
+  assert.equal(prefixFindings('Изображение новости Тест').length, 1, 'this one is');
+});

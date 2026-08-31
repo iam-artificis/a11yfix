@@ -145,7 +145,13 @@ export function parseCss(source: string): ParsedCss {
   const src = blankComments(source);
   const rules: CssRule[] = [];
   const rootVariables: Record<string, string> = {};
-  const conditions: string[] = [];
+  // Every open at-rule group, marked with whether it really makes the rules inside it
+  // conditional. `@layer` does not: it moves rules to another cascade layer and they
+  // apply as normal. Tailwind v4 wraps its whole output in one, so counting it as a
+  // condition would make every rule in a modern build read as "might not apply" and
+  // leave the page's colours unresolvable. @media, @supports, @container and @scope
+  // genuinely are conditional and stay so.
+  const groups: { text: string; conditional: boolean }[] = [];
 
   let i = 0;
   while (i < src.length) {
@@ -153,7 +159,7 @@ export function parseCss(source: string): ParsedCss {
     if (i >= src.length) break;
 
     if (src[i] === '}') {
-      conditions.pop();
+      groups.pop();
       i++;
       continue;
     }
@@ -187,7 +193,7 @@ export function parseCss(source: string): ParsedCss {
       // Conditional groups nest rules; @keyframes and @font-face do not contain
       // selectors we care about, so their bodies are skipped wholesale.
       if (name === '@media' || name === '@supports' || name === '@container' || name === '@layer' || name === '@scope') {
-        conditions.push(prelude);
+        groups.push({ text: prelude, conditional: name !== '@layer' });
         i = bodyStart;
         continue;
       }
@@ -222,7 +228,7 @@ export function parseCss(source: string): ParsedCss {
       declarations,
       start: preludeStart,
       end: bodyEnd,
-      conditions: [...conditions],
+      conditions: groups.filter((g) => g.conditional).map((g) => g.text),
     });
     i = bodyEnd + 1;
   }
@@ -322,10 +328,24 @@ export function relativeFontFactor(value: string): number | undefined {
   return m[2] === '%' ? n / 100 : n;
 }
 
-/** Is this font-weight bold enough for WCAG's "large bold text" allowance? */
-export function isBoldWeight(value: string): boolean {
+/**
+ * Is this font-weight bold enough for WCAG's "large bold text" allowance?
+ *
+ * `undefined` means the declaration exists but we cannot decide it — `inherit`, or a
+ * custom property we did not resolve. That is not the same answer as "not bold", and
+ * returning `false` for it was worse than saying nothing: it cut off inheritance, so
+ * `font-weight: inherit` on a child of a bold heading made the child count as normal
+ * weight and be held to 4.5:1 instead of 3:1.
+ *
+ * `!important` needs no handling here. The declaration parser records the flag
+ * separately and hands over a value with it already removed.
+ */
+export function isBoldWeight(value: string): boolean | undefined {
   const v = value.trim().toLowerCase();
   if (v === 'bold' || v === 'bolder') return true;
+  if (v === 'normal' || v === 'lighter' || v === 'initial') return false;
+  // Anything computed elsewhere: var(), calc(), inherit, unset, revert.
+  if (!/^\d+$/.test(v)) return undefined;
   const n = parseInt(v, 10);
   return Number.isFinite(n) && n >= 700;
 }

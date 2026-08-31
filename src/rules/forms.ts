@@ -991,7 +991,12 @@ function normaliseKey(text: string): string {
 function inferAutocomplete(el: Element): string | null {
   const type = inputType(el);
   if (type === null) return null;
-  const byType = TYPE_TOKENS[type];
+  // `Object.hasOwn`, not a truthiness test: these tables are plain object literals, so
+  // they answer for every name on Object.prototype too. `<input type="constructor">`
+  // looked up the Object constructor, passed the `!== undefined` check, and offered to
+  // write autocomplete="function Object() { [native code] }" into somebody's source;
+  // `<input name="constructor">` reached `token.endsWith` on a function and threw.
+  const byType = Object.hasOwn(TYPE_TOKENS, type) ? TYPE_TOKENS[type] : undefined;
   if (byType !== undefined) return byType;
 
   for (const attr of ['name', 'id']) {
@@ -1005,7 +1010,7 @@ function inferAutocomplete(el: Element): string | null {
     const parts = raw.split(/[[\].]+/).filter((p) => p !== '');
     const last = parts.length > 0 ? parts[parts.length - 1] : raw;
     const key = normaliseKey(last ?? raw);
-    const token = NAME_TOKENS[key];
+    const token = Object.hasOwn(NAME_TOKENS, key) ? NAME_TOKENS[key] : undefined;
     if (token !== undefined) {
       // A password field only earns a token when the name says which password it is.
       if (type === 'password' && !token.endsWith('password')) continue;
@@ -1185,15 +1190,32 @@ const fieldsetWithoutLegend: Rule = {
 // ---------------------------------------------------------------------------
 
 /**
- * Text anywhere in the document that explains what an asterisk means.
+ * Text that explains what an asterisk means, in the languages this rule can read.
  *
- * Each alternative is anchored and uses only bounded quantifiers over disjoint character
- * classes, so there is no nested repetition for a pathological input to backtrack over.
- * The `=` form is spelled separately because `\b` after `=` can never match a following
- * space, which silently broke the commonest legend of all: "* = required".
+ * Each alternative uses only bounded quantifiers over character classes, so there is no
+ * nested repetition for a pathological input to backtrack over. The `=` form is spelled
+ * separately because `\b` after `=` can never match a following space, which silently
+ * broke the commonest legend of all: "* = required".
+ *
+ * The Russian half is here because the rule was accusing Russian forms of leaving an
+ * asterisk unexplained while the page said «* — обязательные поля» directly above it.
+ * The end-of-word guards are lookaheads rather than `\b`, which is defined over ASCII
+ * word characters and therefore never matches after a Cyrillic letter.
  */
-const ASTERISK_LEGEND =
-  /\*\s{0,4}(?:indicates|denotes|means|marks|is)\b|\*\s{0,4}=|required\s{1,4}fields?\b/i;
+const ASTERISK_LEGEND = new RegExp(
+  [
+    String.raw`\*\s{0,4}(?:indicates|denotes|means|marks|is)(?![\p{L}])`,
+    String.raw`\*\s{0,4}=`,
+    String.raw`required\s{1,4}fields?(?![\p{L}])`,
+    // «обязательные поля», «обязательно для заполнения», «обязательные к заполнению».
+    String.raw`обязательн\p{L}{0,6}\s{0,4}(?:для\s{1,4}заполнени\p{L}{1,2}|к\s{1,4}заполнению|пол[яе])`,
+    // «поля, отмеченные *, обязательны» — the same sentence with the words the other way.
+    String.raw`пол[яе]\p{L}{0,3}[^.!?]{0,48}обязательн`,
+    // «Звёздочкой отмечены…», in both of the two spellings Russian writes it in.
+    String.raw`зв[еёе]здочк\p{L}{0,3}`,
+  ].join('|'),
+  'iu',
+);
 
 const asteriskOnlyRequired: Rule = {
   id: 'A11Y-FORM-008',
@@ -1210,8 +1232,13 @@ const asteriskOnlyRequired: Rule = {
     // Deliberately narrow: we only speak up when an asterisk is doing the work and
     // nothing on the page explains it. A form that says "* indicates a required field"
     // is fine and must stay silent.
-    const explained = ASTERISK_LEGEND.test(ctx.source);
-    if (explained) return out;
+    // Only text a person can actually read counts as an explanation, so this asks the
+    // markup and not the file. Testing the raw source meant a CSS attribute selector —
+    // `[class*="cell"]` inside one inline <style> — matched the `* =` form and switched
+    // the rule off for the entire document; true on five of the ninety-two pages in the
+    // audit corpus, and invisible because the symptom is silence.
+    const visible = ctx.markup.roots.map((r) => textOf(r)).join(' ');
+    if (ASTERISK_LEGEND.test(visible)) return out;
 
     for (const el of ctx.markup.elements) {
       if (!isFormControl(el)) continue;

@@ -195,8 +195,19 @@ function quoteValue(value: string): string | null {
   return `"${value}"`;
 }
 
+/**
+ * Cut to `max` UTF-16 units, but never between the halves of a surrogate pair.
+ *
+ * `slice` counts code units, so a cut that lands inside an emoji or a rarer CJK character
+ * leaves a lone surrogate — a replacement glyph in the middle of a report line the client
+ * is reading. Backing off one unit is enough: a pair is exactly two.
+ */
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+  if (s.length <= max) return s;
+  let cut = max - 1;
+  const last = s.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut--;
+  return `${s.slice(0, cut)}…`;
 }
 
 function elementSpan(el: Element): { start: number; end: number } {
@@ -219,7 +230,13 @@ function documentLanguage(ctx: RuleContext): string {
     const lang = readAttr(el, 'lang');
     if (!lang.present || lang.dynamic) return 'en';
     const primary = lang.value.trim().toLowerCase().split(/[-_]/)[0];
-    return primary !== undefined && primary.length > 0 ? primary : 'en';
+    if (primary !== undefined && primary.length > 0) return primary;
+    // `lang=""` is the standard "language unknown" value, and it is exactly what
+    // A11Y-DOC-001's own review-safety fix writes for a human to fill in. Reading it as
+    // English would mean applying our patch and then confidently checking Russian link
+    // text against an English vocabulary — the tool contradicting itself one rule apart.
+    // An empty key matches no table, so the rules that need a language stay quiet.
+    return '';
   }
   return 'en';
 }
@@ -268,8 +285,12 @@ const GENERIC_LINK_TEXT: Readonly<Record<string, readonly string[]>> = {
   // most institutional sites; a screen-reader user listing the links then hears it forty
   // times with nothing to tell them apart.
   //
-  // normalizeText decomposes and strips combining marks, so «ё» arrives as «е»: the
-  // spellings written here are the post-normalisation ones, and «ещё» would never match.
+  // Write these the way a person writes them. Both sides are put through normalizeText
+  // before they are compared, which decomposes and strips combining marks — «ё» to «е»,
+  // «й» to «и» — so either spelling matches. That was not always true: the entries used
+  // to be compared raw against normalised page text, which made «перейти» here unable to
+  // match «Перейти» there, and «новой вкладке» in the table below unable to match a link
+  // that announced itself perfectly well.
   ru: [
     'подробнее', 'подробно', 'подробная информация', 'читать далее', 'читать дальше',
     'читать', 'читать полностью', 'далее', 'дальше', 'здесь', 'тут', 'сюда',
@@ -492,8 +513,14 @@ const genericLinkText: Rule = {
     const lang = documentLanguage(ctx);
     // English always applies: it is the default vocabulary of most codebases even when
     // the rendered page is not English.
-    const phrases = new Set<string>(GENERIC_LINK_TEXT['en']);
-    for (const phrase of GENERIC_LINK_TEXT[lang] ?? []) phrases.add(phrase);
+    // Both sides go through normalizeText, so a table entry cannot silently fail to match
+    // by being spelled the way a person would write it. «Перейти» normalises to «переити»
+    // — NFD decomposes «й» into «и» plus a combining breve, which the accent strip then
+    // removes — so the entry written as «перейти» could never match anything, and neither
+    // could any other entry containing й or ё. Normalising the table removes the trap
+    // instead of asking every future contributor to remember it.
+    const phrases = new Set<string>((GENERIC_LINK_TEXT['en'] ?? []).map((p) => normalizeText(p)));
+    for (const phrase of GENERIC_LINK_TEXT[lang] ?? []) phrases.add(normalizeText(phrase));
 
     const out: Violation[] = [];
     for (const el of ctx.markup.elements) {
@@ -809,7 +836,10 @@ const unannouncedNewWindow: Rule = {
       if (title.dynamic) continue;
       const haystack = normalizeText(`${name.text} ${title.value}`);
       if (haystack === '') continue; // unnamed link: A11Y-LINK-001 owns that
-      if (hints.some((hint) => haystack.includes(hint))) continue;
+      // Normalised on both sides for the same reason the generic-text table is: a hint
+      // written «откроется в новом окне» has to survive the й-to-и decomposition to match
+      // the page text, which went through it too.
+      if (hints.some((hint) => haystack.includes(normalizeText(hint)))) continue;
 
       const span = elementSpan(el);
       out.push(

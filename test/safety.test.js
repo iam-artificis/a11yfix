@@ -330,3 +330,53 @@ test('a corrected line never contains a TODO marker', () => {
     }
   }
 });
+
+test('a field named after a prototype member is data, not a lookup', () => {
+  // TYPE_TOKENS and NAME_TOKENS are object literals, so they answer for every name on
+  // Object.prototype. `<input type="constructor">` found the Object constructor, passed
+  // the `!== undefined` test, and produced a review-safety fix offering to write
+  // autocomplete="function Object() { [native code] }" into the source; the name form
+  // reached .endsWith on a function and threw, taking the whole file's findings with it.
+  const cases = ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'valueOf'];
+  for (const word of cases) {
+    for (const attr of ['type', 'name', 'id']) {
+      const source =
+        `<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><h1>h</h1>` +
+        `<form><label for="f">Field</label><input id="f" ${attr}="${word}">` +
+        `<button type="submit">Go</button></form></main></body></html>`;
+      const result = run('t.html', source, { fixThreshold: 'review' });
+      for (const v of result.violations) {
+        for (const edit of v.fix.edits) {
+          assert.ok(
+            !/native code|function Object/.test(edit.replacement),
+            `${attr}="${word}" produced ${edit.replacement}`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('a report line never ends in half a character', () => {
+  // truncate() and short() count UTF-16 units, so a cut that lands between the halves of
+  // an astral character leaves a lone surrogate — a replacement glyph in a line the
+  // client is reading. Emoji at every offset around the cut, so one of them straddles it.
+  for (let pad = 0; pad < 8; pad++) {
+    const text = 'a'.repeat(pad) + '\u{1F600}'.repeat(60);
+    const source =
+      `<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><h1>h</h1>` +
+      `<a href="/x/">${text}</a><img src="a.png" alt="image of ${text}">` +
+      `</main></body></html>`;
+    for (const v of run('t.html', source).violations) {
+      const fields = [v.message, v.impact, v.fix.description, v.fix.advisory, v.excerpt];
+      for (const field of fields) {
+        if (typeof field !== 'string') continue;
+        assert.ok(
+          !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(field) &&
+            !/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(field),
+          `lone surrogate in ${v.ruleId}: ${JSON.stringify(field.slice(-20))}`,
+        );
+      }
+    }
+  }
+});

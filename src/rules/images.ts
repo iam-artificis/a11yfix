@@ -248,7 +248,13 @@ function removeAttrEdit(ctx: RuleContext, a: Attr, label: string): Edit {
 /** Collapse to one line and clip, for embedding a value inside a message. */
 function short(value: string, max = 60): string {
   const t = value.replace(/\s+/g, ' ').trim();
-  return t.length <= max ? t : t.slice(0, max - 3) + '...';
+  if (t.length <= max) return t;
+  // Not between the halves of a surrogate pair: `slice` counts UTF-16 units, and a cut
+  // inside an emoji puts a lone surrogate — a replacement glyph — into a report line.
+  let cut = max - 3;
+  const last = t.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut--;
+  return t.slice(0, cut) + '...';
 }
 
 /** A manual fix: advice, never an edit. */
@@ -486,6 +492,55 @@ const altIsPlaceholder: Rule = {
  */
 const REDUNDANT_PREFIX = /^\s*(?:an?\s+)?(?:image|picture|photo|photograph|graphic)\s+(?:of|showing|depicting)\s+/i;
 
+/**
+ * The same fault in Russian, which the rule's own Russian summary has been promising to
+ * catch while the regex above could not match a word of it. www.rsl.ru serves fifteen
+ * images described as «Изображение новости …» and meloman.ru sixty-two as «Изображение
+ * слайдера» — exactly what this rule is for, silently missed.
+ *
+ * English marks the relation with a preposition — "photo *of* the building" — and that
+ * preposition is what makes the English pattern safe to match. Russian marks it with the
+ * genitive case, which we cannot read, so matching the medium word alone would flag
+ * «Изображение Богоматери» on a museum page: an icon whose actual title begins that way.
+ * Instead the second word has to be one of the generic containers a CMS names — новость,
+ * слайдер, баннер, карточка — none of which describes a picture in any language.
+ *
+ * Two parts rather than one pattern, because the split is what makes the fix safe: we
+ * know precisely how many words are boilerplate, so what remains is the headline in the
+ * nominative and reads correctly on its own. Stripping only «Изображение» would leave
+ * «новости Афиша на сентябрь», which is not Russian.
+ */
+const RU_MEDIUM =
+  /^\s*(?:изображени[ея]|фотографи[яи]|фотоснимок|фото|картинк[аи]|рисун(?:ок|ка)|иллюстраци[яи]|снимок|снимка)\s+/iu;
+
+/**
+ * Words that name a slot on the page rather than anything visible in the picture.
+ *
+ * The trailing guard is a lookahead and not `\b`, which is ASCII-only even under the `u`
+ * flag: «новости» ends in a letter JavaScript does not count as a word character, so
+ * there is no boundary there to match and the first version of this silently matched
+ * nothing at all.
+ */
+const RU_GENERIC_HEAD =
+  /^(?:новост[иья]|слайдер[ауы]?|баннер[ауы]?|карточк[аи]|стать[иья]|товара|галере[ий]|страниц[аыи]|раздела|материала|публикации|блока|элемента|поста|анонса|записи|документа|файла|логотипа)(?![\p{L}\p{N}])/iu;
+
+/**
+ * Match the Russian form, returning the whole boilerplate prefix or `null`.
+ *
+ * Returns medium + container together, so the caller's existing "what is left over"
+ * logic works unchanged: «Изображение слайдера» leaves nothing, which already routes to
+ * advice rather than a rewrite, and «Изображение новости Афиша…» leaves the headline.
+ */
+function russianRedundantPrefix(value: string): string | null {
+  const medium = RU_MEDIUM.exec(value);
+  if (medium === null) return null;
+  const after = value.slice(medium[0].length);
+  const head = RU_GENERIC_HEAD.exec(after);
+  if (head === null) return null;
+  const trailing = /^\s*/.exec(after.slice(head[0].length));
+  return medium[0] + head[0] + (trailing === null ? '' : trailing[0]);
+}
+
 const altRedundantPrefix: Rule = {
   id: 'A11Y-IMG-003',
   title: 'Alt text repeats the role of the element',
@@ -503,19 +558,22 @@ const altRedundantPrefix: Rule = {
       if (alt === undefined || isExpression(alt) || alt.value === null) continue;
 
       const match = REDUNDANT_PREFIX.exec(alt.value);
-      if (match === null) continue;
-      const prefix = match[0];
+      const prefix = match !== null ? match[0] : russianRedundantPrefix(alt.value);
+      if (prefix === null) continue;
       const rest = alt.value.slice(prefix.length);
 
       let fix: Fix;
       if (rest.trim() === '') {
         // "image of" and nothing else. Deleting it would leave alt="", which is a claim
         // that the image is decorative — a claim only a person can make.
-        fix = advice(
-          'No automatic fix: removing the prefix would leave the alt text empty.',
-          `alt="${short(alt.value, 40)}" says only that this is an image. Replace it with a ` +
-            'description of what the image shows, or with alt="" if it is decorative.',
-        );
+        fix = {
+          ...advice(
+            'No automatic fix: removing the prefix would leave the alt text empty.',
+            `alt="${short(alt.value, 40)}" says only that this is an image. Replace it with a ` +
+              'description of what the image shows, or with alt="" if it is decorative.',
+          ),
+          reason: 'nothing-left',
+        };
       } else if (!attrSpanIsSafe(ctx, el, alt)) {
         // The recorded value span cannot be trusted — an unterminated quote or a runaway
         // opening tag — so rewriting it would delete source that is not ours to touch.
@@ -551,11 +609,21 @@ const altRedundantPrefix: Rule = {
           severity: 'warning',
           start: alt.nameStart,
           end: alt.valueEnd,
-          message: `alt="${short(alt.value, 48)}" opens with "${prefix.trim()}".`,
+          message:
+            rest.trim() === ''
+              ? // Saying it "opens with" the whole of itself reads as a tautology, which
+                // is how the empty-remainder case looked before: alt="Изображение
+                // слайдера" opens with "Изображение слайдера".
+                `alt="${short(alt.value, 48)}" names the medium and the slot it sits in, and nothing else.`
+              : `alt="${short(alt.value, 48)}" opens with "${prefix.trim()}".`,
           impact:
-            'A screen reader announces the element as an image before reading the alt text, ' +
-            `so the listener hears "image, ${short(prefix.trim().toLowerCase() + ' ' + rest.trim(), 40)}" ` +
-            '— the same word twice, in front of every such image on the page.',
+            rest.trim() === ''
+              ? 'A screen reader announces the element as an image and then reads a phrase that ' +
+                'repeats it. Someone who cannot see the picture learns where it sits on the page ' +
+                'and nothing about what it shows.'
+              : 'A screen reader announces the element as an image before reading the alt text, ' +
+                `so the listener hears "image, ${short(prefix.trim().toLowerCase() + ' ' + rest.trim(), 40)}" ` +
+                '— the same word twice, in front of every such image on the page.',
           fix,
         }),
       );

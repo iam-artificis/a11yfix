@@ -88,6 +88,8 @@ interface ElementStyle {
   /** A font-size was declared in a unit we cannot resolve at all (vw, calc, clamp). */
   fontSizeUnknown?: boolean;
   bold?: boolean;
+  /** A font-weight was declared in a form we cannot decide (var(), inherit, calc()). */
+  boldUnknown?: boolean;
   /**
    * Resolved box properties, kept only for the overlay test and only when one of them was
    * declared. See `BOX_PROPS`.
@@ -464,7 +466,11 @@ export class Palette {
         else if (factor !== undefined) out.fontSizeFactor = factor;
         else out.fontSizeUnknown = true;
       } else if (d.prop === 'font-weight') {
-        out.bold = isBoldWeight(d.value);
+        const b = isBoldWeight(d.value);
+        delete out.bold;
+        delete out.boldUnknown;
+        if (b === undefined) out.boldUnknown = true;
+        else out.bold = b;
       } else if (BOX_PROPS.has(d.prop)) {
         (out.box ??= {})[d.prop] = d.value.trim().toLowerCase();
       }
@@ -689,6 +695,7 @@ export class Palette {
     const factors: number[] = [];
     let unknown = false;
     let bold: boolean | undefined;
+    let boldUnknown = false;
     let node: Element | null = el;
     let depth = 0;
     while (node !== null && depth < 64) {
@@ -698,8 +705,11 @@ export class Palette {
         else if (own?.fontSizeFactor !== undefined) factors.push(own.fontSizeFactor);
         else if (own?.fontSizeUnknown === true) unknown = true;
       }
-      if (bold === undefined && own?.bold !== undefined) bold = own.bold;
-      if ((size !== undefined || unknown) && bold !== undefined) break;
+      if (bold === undefined && !boldUnknown) {
+        if (own?.bold !== undefined) bold = own.bold;
+        else if (own?.boldUnknown === true) boldUnknown = true;
+      }
+      if ((size !== undefined || unknown) && (bold !== undefined || boldUnknown)) break;
       node = node.parent;
       depth++;
     }
@@ -715,9 +725,16 @@ export class Palette {
     const base = size ?? (factors.length > 0 ? undefined : tagDefault);
     const resolved =
       size !== undefined ? factors.reduce((n, f) => n * f, size) : tagDefault;
-    const certain = !unknown && resolved !== undefined;
+    const px = resolved ?? base ?? 16;
+    // An undecidable weight only changes the verdict between 18.66px and 24px: below that
+    // band nothing is large text and above it everything is, whether or not it is bold.
+    // Widening the doubt beyond the band would suppress real findings on small text for
+    // no reason, which is the failure this whole flag exists to avoid in the other
+    // direction.
+    const weightCouldDecide = boldUnknown && px >= 18.66 && px < 24;
+    const certain = !unknown && resolved !== undefined && !weightCouldDecide;
     return {
-      fontSizePx: resolved ?? base ?? 16,
+      fontSizePx: px,
       bold: bold ?? (tagDefault !== undefined),
       certain,
     };

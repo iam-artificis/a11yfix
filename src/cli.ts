@@ -94,10 +94,21 @@ function reportSubject(paths: readonly string[], pages: readonly FetchedPage[]):
   return paths.join(', ');
 }
 
-/** The command that reproduces this report, printed in its footer. */
-function reportCommand(paths: readonly string[], sitemap: string | undefined): string {
-  if (sitemap !== undefined) return `a11yfix --sitemap ${sitemap} --report`;
-  return `a11yfix ${paths.length === 0 ? '.' : paths.join(' ')} --report`;
+/**
+ * The command that reproduces this report, printed in its footer.
+ *
+ * Every option that changed what the report says has to be in it. A Russian report used
+ * to tell the reader, twice, to run the command in its own footer — and that command
+ * omitted `--lang ru`, so it produced an English one. The level is the same story: a
+ * report generated at AAA reproduced at AA and came back shorter, with no explanation.
+ */
+function reportCommand(opts: Options): string {
+  const target = opts.sitemap !== undefined ? `--sitemap ${opts.sitemap}` : (opts.paths.length === 0 ? '.' : opts.paths.join(' '));
+  const parts = ['a11yfix', target, '--report'];
+  if (opts.level !== 'AA') parts.push(`--level ${opts.level}`);
+  if (opts.reportLang !== 'en') parts.push(`--lang ${opts.reportLang}`);
+  if (opts.all) parts.push('--all');
+  return parts.join(' ');
 }
 
 function parseArgs(argv: readonly string[]): Options {
@@ -884,7 +895,7 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
       level: opts.level,
       toolVersion: VERSION,
       includeInfo: opts.all,
-      command: reportCommand(opts.paths, opts.sitemap),
+      command: reportCommand(opts),
       lang: opts.reportLang,
     });
     try {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { analyseSource } from '../dist/engine.js';
 import { ALL_RULES } from '../dist/rules/index.js';
 import { renderReport } from '../dist/report.js';
-import { RULE_TEXT_RU, pluralRu } from '../dist/i18n/ru.js';
+import { RULE_TEXT_RU, pluralRu, UI_RU } from '../dist/i18n/ru.js';
 import { strings } from '../dist/i18n/index.js';
 
 /**
@@ -246,4 +246,40 @@ test('every manual reason a rule can emit has a Russian sentence of its own', ()
   }
   const said = new Set(Object.values(text.manualByReason ?? {}));
   assert.equal(said.size, REASONS.length, 'each reason needs its own sentence, not a shared one');
+});
+
+test('the folded-occurrences line declines like every other count', () => {
+  // The one string that inlined its own plural test, and the only one that got it wrong:
+  // 2, 3 and 4 take the second form, so it printed «Ещё 2 вхождений».
+  const forms = [
+    [1, 'вхождение'],
+    [2, 'вхождения'],
+    [4, 'вхождения'],
+    [5, 'вхождений'],
+    [11, 'вхождений'],
+    [21, 'вхождение'],
+    [22, 'вхождения'],
+    [111, 'вхождений'],
+  ];
+  for (const [n, word] of forms) {
+    // Not a word boundary: \b is defined over ASCII word characters, so there is none
+    // after a Cyrillic letter and the assertion would pass on the wrong form.
+    const ends = String.raw`(?![\p{L}])`;
+    assert.match(UI_RU.more(n), new RegExp(`${n} ${word}${ends}`, 'u'), `${n} takes «${word}»`);
+  }
+});
+
+test('the conformance level is spelled one way in one document', () => {
+  // Header and criterion table write Cyrillic «уровень АА»; the caveat used to write
+  // Latin «уровней A и AA» four paragraphs down. A reader who notices does not conclude
+  // the document was proofread.
+  const html = render(
+    summaryOf('page.html', '<!DOCTYPE html><html><head></head><body><img src="a.png"></body></html>'),
+    'ru',
+  );
+  const body = html.replace(/<code>[\s\S]*?<\/code>/g, '').replace(/WCAG 2\.2/g, '');
+  assert.ok(
+    !/\bуровн\w*\s+A\b|\bуровн\w*\s+AA\b|уровней A и AA/.test(body),
+    'the level must be written in Cyrillic wherever the surrounding prose is Russian',
+  );
 });
