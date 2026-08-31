@@ -296,25 +296,25 @@ three hundred and ten it lists, taken at an even stride across the list:
 npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
 ```
 
-**5133 findings across 48 pages** — 2438 errors, 63 warnings, 2632 info — in
+**4945 findings across 48 pages** — 2438 errors, 63 warnings, 2444 info — in
 twenty-six seconds, including the fetching. Five rules account for 3890 of them:
 1362 links opening a new window with no `rel`, 782 links with no discernible text,
 617 unannounced new windows, 608 images with no `alt` at all, 521 buttons with no
-accessible name. Sixteen other rules divide the remaining 1243 between them.
+accessible name. Seventeen other rules divide the remaining 1055 between them.
 
 Two of those five are conventions rather than barriers and are reported as information,
-which is what makes the report's own headline 2501 rather than 5133. That distinction was
+which is what makes the report's own headline 2501 rather than 4945. That distinction was
 made here, on this measurement: `rel="noopener"` was a warning until 1362 of a museum's
 findings turned out to be it — a quarter of an accessibility audit spent on a token with
 no WCAG criterion behind it, which every browser has implied by default since early 2021.
-This run also cost 649 findings to the `[^A-Za-z]` bug described above; they were all
-this site's Russian alt text, and none of them was real.
+The same run shed 649 findings to the `[^A-Za-z]` bug described above — all of them this
+site's Russian alt text, none of them real — and 188 more to the href-string comparison.
 
 Two things about that number are worth stating plainly, because both cut against it.
 
 Most of it is one template repeated. The per-page table in the report makes this
-unmissable. Below the front page — its own layout, and the worst at 324 — forty-six of the
-remaining forty-seven run between 98 and 128 findings each, across excursions,
+unmissable. Below the front page — its own layout, and the worst at 320 — forty-six of the
+remaining forty-seven run between 94 and 124 findings each, across excursions,
 exhibitions, education and the research department: a spread of thirty on pages that have
 nothing in common but their template. That is not forty-eight problems. It is a handful of
 problems in a shared header, footer and card, multiplied by forty-eight. The honest way to
