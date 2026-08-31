@@ -279,17 +279,33 @@ const GENERIC_LINK_TEXT: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
-/** Phrases that already warn a user that the link leaves the current window. */
-const NEW_WINDOW_HINTS: readonly string[] = [
-  'new window', 'new tab', 'opens in', 'opens a new', 'external link', 'external site',
-  'nueva ventana', 'nueva pestana', 'se abre en', 'enlace externo',
-  'nouvelle fenetre', 'nouvel onglet', 'ouvre dans', 'lien externe',
-  'neues fenster', 'neuer tab', 'neuem tab', 'neuem fenster', 'externer link',
-  'nova janela', 'nova aba', 'abre em', 'link externo',
-  'nuova finestra', 'nuova scheda', 'si apre in', 'link esterno',
-  'nieuw venster', 'nieuw tabblad', 'opent in', 'externe link',
-  'новом окне', 'новой вкладке', 'откроется в', 'внешняя ссылка', 'внешний сайт',
-];
+/**
+ * Phrases that already warn a user that the link leaves the current window, by language.
+ *
+ * Keyed rather than pooled, and the key decides whether the rule runs at all. A flat list
+ * meant that on a Greek page every `target="_blank"` link was reported as unannounced —
+ * including the one whose text ends «ανοίγει σε νέα καρτέλα», which says exactly the thing
+ * the finding accuses it of not saying. The tool had no Greek, so what it actually knew
+ * was nothing, and it reported that as a fault.
+ *
+ * A language absent from this table is a language this rule cannot read, so it says
+ * nothing there. That loses real findings on those pages. It is the trade this tool makes
+ * everywhere, and the alternative — guessing from an alphabet — is how the placeholder-alt
+ * rule invented 649 findings on one Russian site.
+ */
+const NEW_WINDOW_HINTS: Readonly<Record<string, readonly string[]>> = {
+  en: ['new window', 'new tab', 'opens in', 'opens a new', 'external link', 'external site'],
+  es: ['nueva ventana', 'nueva pestana', 'se abre en', 'enlace externo'],
+  fr: ['nouvelle fenetre', 'nouvel onglet', 'ouvre dans', 'lien externe'],
+  de: ['neues fenster', 'neuer tab', 'neuem tab', 'neuem fenster', 'externer link'],
+  pt: ['nova janela', 'nova aba', 'abre em', 'link externo'],
+  it: ['nuova finestra', 'nuova scheda', 'si apre in', 'link esterno'],
+  nl: ['nieuw venster', 'nieuw tabblad', 'opent in', 'externe link'],
+  ru: [
+    'новом окне', 'новой вкладке', 'новом окно', 'откроется в', 'открывается в',
+    'внешняя ссылка', 'внешний сайт', 'другой сайт',
+  ],
+};
 
 /** Text that is nothing but a web address. `[^\s]+` is linear — no backtracking risk. */
 const BARE_URL = /^(?:https?:\/\/|ftp:\/\/|www\.)[^\s]+$/i;
@@ -752,6 +768,9 @@ const unannouncedNewWindow: Rule = {
   run(ctx) {
     const jsx = isJsxFile(ctx);
     const out: Violation[] = [];
+    // Nothing can be said about a warning written in a language this rule cannot read.
+    const hints = NEW_WINDOW_HINTS[documentLanguage(ctx)];
+    if (hints === undefined) return out;
 
     for (const el of ctx.markup.elements) {
       if (!isLinkLike(el, jsx)) continue;
@@ -767,7 +786,7 @@ const unannouncedNewWindow: Rule = {
       if (title.dynamic) continue;
       const haystack = normalizeText(`${name.text} ${title.value}`);
       if (haystack === '') continue; // unnamed link: A11Y-LINK-001 owns that
-      if (NEW_WINDOW_HINTS.some((hint) => haystack.includes(hint))) continue;
+      if (hints.some((hint) => haystack.includes(hint))) continue;
 
       const span = elementSpan(el);
       out.push(
