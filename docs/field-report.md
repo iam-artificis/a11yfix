@@ -294,7 +294,7 @@ The same pass cut in the other direction on the wider corpus, where these nine p
 to have no instances. `aria-hidden` on an ancestor now silences the naming rules — a
 decorative duplicate that nothing announces cannot fail to announce anything — and that
 removed 30 findings that were wrong across the rest of the Russian set. Net over all
-sixteen thousand: +288, of which 304 are information and 21 are warnings that went away.
+sixteen thousand: +287, of which 304 are information and 21 are warnings that went away.
 
 All four were found the same way: by looking at what the tool did to a real site in the
 segment it is sold into, one finding at a time. None was reachable from a unit test — though
