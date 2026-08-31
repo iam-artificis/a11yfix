@@ -250,3 +250,43 @@ done
 Live sites change without notice, so unlike the repository table these numbers are not
 pinned and will drift. What should not drift is the shape: a small number of rules
 accounting for most of the findings, and the overlay sitting on top of them.
+
+### A third measurement: one site, all of it
+
+One page is a sample, and the number a site's owner actually needs is for the site. On the
+same day, `shm.ru` again — this time through its own sitemap, forty-eight pages of the
+three hundred and ten it lists, taken at an even stride across the list:
+
+```bash
+npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
+```
+
+**5774 findings across 48 pages** — 3080 errors, 1424 warnings, 1270 info — in
+twenty-six seconds, including the fetching. Five rules account for 4018 of them:
+1362 links opening a new window with no `rel`, 782 links with no discernible text,
+649 placeholder `alt`s, 617 unannounced new windows, 608 images with no `alt` at all.
+Sixteen other rules divide the remaining 1756 between them.
+
+Two things about that number are worth stating plainly, because both cut against it.
+
+Most of it is one template repeated. The per-page table in the report makes this
+unmissable. Below the front page — which is its own layout, and the worst at 364 — the
+next forty-six run between 103 and 133 findings each, across excursions, exhibitions,
+education and the research department: a spread of thirty on pages that have nothing in
+common but their template. That is not forty-eight problems. It is a handful of problems
+in a shared header, footer and card, multiplied by forty-eight. The honest way to sell
+against this number is that the fix is far smaller than the count, not that the site is
+forty-eight times as broken as one page suggested.
+
+The forty-eighth row is worth reading too: `/issledovatelyam/premii-zabelina/s.html`,
+16 findings, an order of magnitude below every other page. It is a stub, and the table is
+where that becomes visible instead of quietly averaging into the total.
+
+And 1611 of them are findings the tool could patch, on a scan that has no file to patch.
+That is the case the corrected line in the report exists for: no diff can be handed over,
+so each one is printed as the line as it stands and the line after the change.
+
+The sampling is the reason this is a measurement of the site rather than of one corner of
+it. Read in document order, the first twelve of `shm.ru`'s three hundred and ten are
+`1script.php`, `script.php`, `test.php` and nine pages of one section — a Bitrix sitemap
+comes out oldest-section-first. Three of those twelve serve nothing a visitor ever sees.
