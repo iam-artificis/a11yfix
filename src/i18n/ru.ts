@@ -28,8 +28,11 @@ export const UI_RU: UiStrings = {
   titlePrefix: 'Аудит доступности',
   subject: (name: string): string => `Аудит доступности: ${name}`,
   impactPlacement: 'group',
+  // The level is Cyrillic here for the same reason it is in the criterion table: one
+  // document should not write «уровень AA» in the header and «АА» four paragraphs down.
   subline: (date: string, level: string, files: number, version: string): string =>
-    `${date} · WCAG 2.2, уровень ${level} · проверено: ${pluralRu(files, 'файл', 'файла', 'файлов')} · a11yfix ${version}`,
+    `${date} · WCAG 2.2 / ГОСТ Р 52872-2019, уровень ${level.replace(/A/g, 'А')} · ` +
+    `проверено: ${pluralRu(files, 'файл', 'файла', 'файлов')} · a11yfix ${version}`,
   cardErrors: 'Ошибки',
   cardWarnings: 'Предупреждения',
   cardFixable: 'Правится патчем',

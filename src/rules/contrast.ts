@@ -215,8 +215,18 @@ function buildEdit(
   // looks at it again. This branch used to trust the solver's own arithmetic; it had a
   // bug, and nothing downstream noticed.
   if (achieved < required) return null;
+  // The label carries the swap for the same reason the Tailwind branch does: it is what
+  // the diff header shows, and it is the one line a reader can check against their own
+  // file in ten seconds. Without it every hex change in a report reads identically, and
+  // eight identical paragraphs say less than eight different ones.
+  const old = wholeSource.slice(span.start, span.end);
   return {
-    edit: { start: span.start, end: span.end, replacement: newHex, label },
+    edit: {
+      start: span.start,
+      end: span.end,
+      replacement: newHex,
+      label: old === '' ? label : `${label}: ${old} -> ${newHex}`,
+    },
     achieved,
   };
 }
@@ -303,8 +313,11 @@ const textContrast: Rule = {
           const edit = built.edit;
           // Describe the edit that will actually be written. When the patch swaps a
           // Tailwind shade, quoting a hex the developer will never see in their diff
-          // makes the report look wrong even though the fix is right.
-          const swap = /: (\S+) -> (\S+)$/.exec(edit.label);
+          // makes the report look wrong even though the fix is right. Everywhere else
+          // the hex is exactly what lands in the file, and naming which side moves is
+          // what lets a reader — or a test — check the ratio for themselves.
+          const swap =
+            target.tailwindClass !== undefined ? /: (\S+) -> (\S+)$/.exec(edit.label) : null;
           fix = {
             safety: 'review',
             edits: [edit],
