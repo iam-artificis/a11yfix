@@ -108,13 +108,29 @@ test('text the exact colour of its background is not reported', () => {
   assert.deepEqual(contrast(page('<div class="hero"><p>Т</p></div>'), [css]), []);
 });
 
-test('the suppression is narrow: near-identical is still reported', () => {
-  // The guard is "exactly the same colour", not "close". Off-white on white is a real
-  // and common mistake, and it stays a finding.
+test('a pair no reader could tell apart is not reported either', () => {
+  // This test used to assert the opposite, on the reasoning that the guard should be
+  // "exactly the same colour" and never "close", because off-white on white is a real
+  // and common mistake. A wider corpus disagreed with the premise at these ratios.
+  //
+  // Reading `!important` into the cascade un-skipped a class of element the parser used
+  // to drop, and nine of the findings that appeared were white text on #fbfbfb — nlr.ru's
+  // `body { background-color: #FBFBFB !important }` under a header whose real backdrop we
+  // still cannot see. rsl.ru produced forty-five more at 1.09:1. Not one of the
+  // fifty-four was real. At 1.03:1 nobody is shipping a design; it is what this tool
+  // computes when it did not see the backdrop, exactly as at 1.00:1.
   const css = `.hero { background: #ffffff; } .hero p { color: #fdfdfd; font-size: 16px; }`;
+  assert.deepEqual(contrast(page('<div class="hero"><p>Т</p></div>'), [css]), []);
+});
+
+test('the suppression is narrow: faint but readable is still reported', () => {
+  // The line has moved, not disappeared. #e0e0e0 on white is 1.32:1 — still invisible to
+  // most people, still a finding, and still nowhere near the 2.5:1 where the complaint
+  // this tool exists to make actually lives.
+  const css = `.hero { background: #ffffff; } .hero p { color: #e0e0e0; font-size: 16px; }`;
   const found = contrast(page('<div class="hero"><p>Т</p></div>'), [css]);
   assert.equal(found.length, 1);
-  assert.match(found[0].message, /#fdfdfd on #ffffff/);
+  assert.match(found[0].message, /#e0e0e0 on #ffffff/);
 });
 
 test('the ordinary finding this tool exists for is untouched by all of it', () => {
@@ -175,4 +191,146 @@ test('a selector whose answer depends on state is still refused', () => {
   // co-occur, which is the failure this module was built to avoid.
   const css = `body { background: #ffffff; } p:hover { color: #999999; font-size: 16px; }`;
   assert.deepEqual(contrast(page('<p>Т</p>'), [css]), []);
+});
+
+/**
+ * The cascade's other half.
+ *
+ * `!important` was parsed as part of the value and then never looked at, which is two
+ * defects wearing one coat. A losing important declaration lost, so the museum this tool
+ * is aimed at was told its white event captions sat on light grey — 102 findings, each
+ * advising it to turn legible white text mid-grey. And a winning one produced
+ * `parseColor('#fff !important')`, which is null, so the element was skipped entirely.
+ */
+
+test('an important declaration beats a more specific one that is not important', () => {
+  // shm.ru in miniature. `.card` is the weaker selector and wins anyway.
+  const css = `.card { background: #ffffff !important; }
+               .wrap .card { background: #f0f0f0; }
+               .card p { color: #ffffff; font-size: 16px; }`;
+  // White on white after the important declaration is honoured, and therefore silent —
+  // the same-colour guard declines to guess at a backdrop it evidently cannot see.
+  assert.deepEqual(contrast(page('<div class="wrap"><div class="card"><p>Т</p></div></div>'), [css]), []);
+});
+
+// #999999 under white is 2.85:1 and fails; #000000 is 21:1 and passes. Every test below
+// distinguishes the two candidate backgrounds by which of those two answers comes out,
+// so a wrong winner cannot pass by accident. (An earlier draft used #767676, which is
+// 4.54:1 — it passes AA, so all three tests were silently asserting nothing.)
+
+test('an important declaration loses to an important one that is more specific', () => {
+  const css = `.card { background: #000000 !important; }
+               .wrap .card { background: #999999 !important; }
+               .card p { color: #ffffff; font-size: 16px; }`;
+  const found = contrast(page('<div class="wrap"><div class="card"><p>Т</p></div></div>'), [css]);
+  assert.equal(found.length, 1, 'the more specific important declaration should win');
+  assert.match(found[0].message, /#ffffff on #999999/);
+});
+
+test('an important declaration in a stylesheet beats an inline style', () => {
+  // The arrangement every CMS theme uses to hold its own against component markup.
+  const css = `.card { background: #999999 !important; } .card p { color: #ffffff; font-size: 16px; }`;
+  const found = contrast(page('<div class="card" style="background:#000000"><p>Т</p></div>'), [css]);
+  assert.equal(found.length, 1, 'the stylesheet !important should outrank the inline style');
+  assert.match(found[0].message, /#ffffff on #999999/);
+});
+
+test('an inline important beats a stylesheet important', () => {
+  const css = `.card { background: #000000 !important; } .card p { color: #ffffff; font-size: 16px; }`;
+  const found = contrast(page('<div class="card" style="background:#999999 !important"><p>Т</p></div>'), [css]);
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /#ffffff on #999999/);
+});
+
+test('a colour marked important is still read, not skipped', () => {
+  // The second arm: the value used to reach parseColor with the flag still attached.
+  const css = `.card { background: #ffffff !important; } .card p { color: #999999 !important; font-size: 16px; }`;
+  const found = contrast(page('<div class="card"><p>Т</p></div>'), [css]);
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /#999999 on #ffffff/);
+});
+
+test('a repair rewrites the colour and leaves the important flag alone', () => {
+  // The recorded span stops before `!important`, so applying a fix cannot silently
+  // change which rule wins on the client's page.
+  const css = `.card { background: #ffffff; } .card p { color: #999999 !important; font-size: 16px; }`;
+  const found = run(page('<div class="card"><p>Т</p></div>'), [css]).violations.filter(
+    (v) => v.ruleId === 'A11Y-COLOR-001',
+  );
+  assert.equal(found.length, 1);
+  for (const edit of found[0].fix?.edits ?? []) {
+    assert.ok(
+      !/!\s*important/i.test(css.slice(edit.start, edit.end)),
+      'the edit range must not cover the !important flag',
+    );
+  }
+});
+
+test('font-weight: bold !important is still bold', () => {
+  // 20px bold is large text and held to 3:1; read as not-bold it was held to 4.5:1 and
+  // reported at 3.45:1.
+  const css = `.card { background: #ffffff; }
+               .card p { color: #767676; font-size: 20px; font-weight: bold !important; }`;
+  assert.deepEqual(contrast(page('<div class="card"><p>Т</p></div>'), [css]), []);
+});
+
+/**
+ * Positioning, read from the stylesheet rather than from Tailwind class names.
+ *
+ * The overlay tests used to look at the class attribute and the `style` attribute and
+ * nowhere else, which is a test for one framework. Every site in the Russian corpus
+ * positions in a .css file.
+ */
+
+test('text under a stretched overlay declared in a stylesheet is not measured', () => {
+  const css = `.card { position: relative; height: 200px; background: #ffffff; }
+               .card .scrim { position: absolute; inset: 0; background: #000000; }
+               .card p { color: #ffffff; font-size: 16px; }`;
+  assert.deepEqual(
+    contrast(page('<div class="card"><div class="scrim"></div><p>Т</p></div>'), [css]),
+    [],
+    'the scrim is declared in CSS, not in a class name',
+  );
+});
+
+test('text in an absolutely positioned box over a sibling image is not measured', () => {
+  // spbu.ru's slider: the caption floats over a photograph in the preceding sibling, and
+  // the white four levels up is real but is not what is behind this text.
+  const css = `.slide { position: relative; background: #ffffff; }
+               .slide .content { position: absolute; bottom: 0; left: 0; }
+               .slide .content span { color: #ffffff; font-size: 16px; }`;
+  const body =
+    '<div class="slide"><div class="media"><img src="/hero.jpg" alt="Фото"></div>' +
+    '<div class="content"><span>Подробнее</span></div></div>';
+  assert.deepEqual(contrast(page(body), [css]), []);
+});
+
+test('an absolutely positioned box that paints itself is still measured', () => {
+  // The narrowing that keeps the rule above useful: a dropdown with its own opaque
+  // background knows exactly what is behind its text.
+  const css = `.slide { position: relative; background: #ffffff; }
+               .slide .menu { position: absolute; bottom: 0; background: #ffffff; }
+               .slide .menu a { color: #999999; font-size: 16px; }`;
+  const body =
+    '<div class="slide"><div class="media"><img src="/hero.jpg" alt="Фото"></div>' +
+    '<div class="menu"><a href="/x">Пункт</a></div></div>';
+  const found = contrast(page(body), [css]);
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /#999999 on #ffffff/);
+});
+
+test('a translucent layer flattened onto the assumed page default is not measured', () => {
+  // Exact arithmetic on an invented input. Every layer is real; the thing at the bottom
+  // is a guess, and a layer is translucent precisely because something is meant to show
+  // through it.
+  const css = `.scrim { background: rgba(0, 0, 0, 0.2); } .scrim p { color: #ffffff; font-size: 16px; }`;
+  assert.deepEqual(contrast(page('<div class="scrim"><p>Т</p></div>'), [css]), []);
+});
+
+test('a translucent layer over a declared colour is measured as normal', () => {
+  const css = `.box { background: #ffffff; }
+               .box .scrim { background: rgba(0, 0, 0, 0.2); }
+               .box .scrim p { color: #ffffff; font-size: 16px; }`;
+  const found = contrast(page('<div class="box"><div class="scrim"><p>Т</p></div></div>'), [css]);
+  assert.equal(found.length, 1, 'the base is declared, so the composite is a measurement');
 });

@@ -17,11 +17,34 @@
 
 export interface Declaration {
   readonly prop: string;
+  /** The value with any `!important` removed; see `valueEnd`. */
   readonly value: string;
   readonly propStart: number;
   readonly valueStart: number;
+  /**
+   * End of the value proper — before `!important`, not after it.
+   *
+   * Everything that offers to rewrite a colour replaces exactly this range, and a patch
+   * that swallowed the flag would quietly change which rule wins on the client's page.
+   * Narrowing the span here means a repair edits the colour and leaves the cascade alone.
+   */
   readonly valueEnd: number;
+  /**
+   * True for `!important`.
+   *
+   * Absent from the first version of this parser, which is how the museum this tool is
+   * aimed at came to be told its white event captions were unreadable. `style.css` says
+   * `.gim-card-event__white { background: var(--white) !important }`; a later sheet says
+   * `.gim-white-block .gim-card-event { background: var(--gray) }` and outranks it on
+   * specificity alone, so every browser paints the card white and a11yfix measured it as
+   * #f0f0f0. That produced 102 findings of white text on a light background, each with
+   * an advisory recommending the museum turn legible captions mid-grey.
+   */
+  readonly important?: boolean;
 }
+
+/** `!important`, with the whitespace and optional comment CSS permits before it. */
+const IMPORTANT = /!\s*important\s*$/i;
 
 export interface CssRule {
   readonly selector: string;
@@ -93,10 +116,24 @@ function parseDeclarations(src: string, from: number, to: number): Declaration[]
       else if ((ch === ';' || ch === '}') && depth <= 0) break;
       i++;
     }
-    const valueEnd = i;
-    const value = src.slice(valueStart, valueEnd).trim();
+    const rawEnd = i;
+    const raw = src.slice(valueStart, rawEnd);
+    const flag = IMPORTANT.exec(raw);
+    const important = flag !== null;
+    // Trailing whitespace is trimmed off the recorded span as well, so a replacement
+    // lands on the value and nothing else.
+    const kept = important ? raw.slice(0, flag.index) : raw;
+    const valueEnd = valueStart + kept.replace(/\s+$/, '').length;
+    const value = kept.trim();
     if (prop !== '' && value !== '') {
-      out.push({ prop: prop.toLowerCase(), value, propStart, valueStart, valueEnd });
+      out.push({
+        prop: prop.toLowerCase(),
+        value,
+        propStart,
+        valueStart,
+        valueEnd,
+        ...(important ? { important: true } : {}),
+      });
     }
     if (src[i] === ';') i++;
   }

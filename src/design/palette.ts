@@ -52,6 +52,18 @@ export interface ResolvedColor {
    * backdrop again, so verifying it needs the backdrop, not the old composite.
    */
   readonly behind?: string;
+  /**
+   * True when the bottom of the stack is the assumed page default rather than a colour
+   * anything actually declared.
+   *
+   * `provenance` cannot carry this: a translucent layer composited onto the assumption is
+   * `'composited'`, which reads as "we worked it out" when the truthful answer is "we
+   * worked it out from a guess". Without the distinction, the uncertainty guard in
+   * contrast.ts saw only the word composited and let three findings through on spbu.ru
+   * saying white text sits on light grey — inside a slider whose real backdrop is a
+   * photograph.
+   */
+  readonly assumedBase?: boolean;
 }
 
 export interface Typography {
@@ -76,7 +88,23 @@ interface ElementStyle {
   /** A font-size was declared in a unit we cannot resolve at all (vw, calc, clamp). */
   fontSizeUnknown?: boolean;
   bold?: boolean;
+  /**
+   * Resolved box properties, kept only for the overlay test and only when one of them was
+   * declared. See `BOX_PROPS`.
+   */
+  box?: Record<string, string>;
 }
+
+/**
+ * The properties that decide whether an element is stretched over its siblings.
+ *
+ * Collected through the same cascade as colour, because the overlay test used to read
+ * the class attribute and the inline style and nothing else — which is a test for
+ * Tailwind. Bitrix, Drupal, Nuxt and every hand-rolled theme put positioning in a
+ * stylesheet, so on rsl.ru the card image that covers the text was invisible to it and
+ * forty-five white headings were reported as white-on-near-white.
+ */
+const BOX_PROPS = new Set(['position', 'inset', 'top', 'right', 'bottom', 'left', 'width', 'height']);
 
 export interface StylesheetSource {
   readonly file: string;
@@ -143,6 +171,8 @@ export class Palette {
   private readonly styles = new Map<Element, ElementStyle>();
   /** Per parent: the children that paint over their siblings. See coveredByOverlay. */
   private readonly overlayCache = new Map<Element, Element[]>();
+  /** Same reasoning as overlayCache: every descendant asks this of the same ancestors. */
+  private readonly floatsCache = new Map<Element, boolean>();
   private readonly cssRules: CssRule[] = [];
   /** Selector key -> the rules carrying it, with their specificity and source position. */
   private readonly ruleIndex = new Map<string, { rank: number; index: number; sel: ParsedSelector }[]>();
@@ -309,7 +339,7 @@ export class Palette {
     matched.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index));
     for (const { index } of matched) {
       const rule = this.cssRules[index] as CssRule;
-      this.absorb(out, rule.declarations, el, 'stylesheet', this.embeddedRules.has(rule) ? this.file : undefined);
+      this.absorb(out, rule.declarations, el, 'stylesheet', this.embeddedRules.has(rule) ? this.file : undefined, false);
     }
 
     // 2. Tailwind utilities in the class list.
@@ -342,12 +372,27 @@ export class Palette {
       if (tw.bold !== undefined) out.bold = tw.bold;
     }
 
-    // 3. Inline style wins over everything else on the same element.
+    // 3. Inline style wins over everything else on the same element — until step 4.
     const styleAttr = getAttr(el, 'style');
-    if (styleAttr !== undefined && !styleAttr.dynamic && styleAttr.value !== null) {
-      const decls = parseInlineStyle(styleAttr.value, styleAttr.valueStart + 1);
-      this.absorb(out, decls, el, 'inline-style', this.file);
+    const inline =
+      styleAttr !== undefined && !styleAttr.dynamic && styleAttr.value !== null
+        ? parseInlineStyle(styleAttr.value, styleAttr.valueStart + 1)
+        : undefined;
+    if (inline !== undefined) this.absorb(out, inline, el, 'inline-style', this.file, false);
+
+    // 4. `!important`, in the same order again.
+    //
+    // The cascade is not one pass with inline at the end. Within the author origin it is
+    // normal declarations by specificity, then the inline attribute, then `!important`
+    // declarations by specificity, then inline `!important` — so a stylesheet marked
+    // important beats an inline style, which is the arrangement every CMS theme uses to
+    // hold its own against a component's inline attributes. Running the same two lists a
+    // second time, filtered the other way, is the whole of it.
+    for (const { index } of matched) {
+      const rule = this.cssRules[index] as CssRule;
+      this.absorb(out, rule.declarations, el, 'stylesheet', this.embeddedRules.has(rule) ? this.file : undefined, true);
     }
+    if (inline !== undefined) this.absorb(out, inline, el, 'inline-style', this.file, true);
 
     return out;
   }
@@ -358,8 +403,11 @@ export class Palette {
     el: Element,
     provenance: Provenance,
     file: string | undefined,
+    /** Which half of the cascade this pass is applying. */
+    important: boolean,
   ): void {
     for (const d of decls) {
+      if ((d.important ?? false) !== important) continue;
       const span = file !== undefined ? { start: d.valueStart, end: d.valueEnd, file } : undefined;
       if (d.prop === 'color') {
         out.color = { value: d.value, provenance, from: el, ...(span !== undefined ? { span } : {}) };
@@ -417,6 +465,8 @@ export class Palette {
         else out.fontSizeUnknown = true;
       } else if (d.prop === 'font-weight') {
         out.bold = isBoldWeight(d.value);
+      } else if (BOX_PROPS.has(d.prop)) {
+        (out.box ??= {})[d.prop] = d.value.trim().toLowerCase();
       }
     }
   }
@@ -477,6 +527,20 @@ export class Palette {
         if (parsed.a >= 1) return this.composite(stack, parsed, topmost, own);
         stack.push(parsed);
       }
+      // The mirror of the test above. That one asks whether something covers this box;
+      // this one asks whether the box is itself floating over something — which is the
+      // commoner arrangement by far, and was not checked at all.
+      //
+      // spbu.ru's slider is the shape: `.slider-content { position: absolute; bottom: 0 }`
+      // holding the caption, laid over a sibling `.slider__media` that carries the
+      // photograph. Walking up from the caption found white four levels above and
+      // composited a scrim onto it, giving ten findings of white text on #cccccc. The
+      // white is real; it is simply not what is behind this text.
+      //
+      // Only asked once the element's own background has failed to settle the question,
+      // so an absolutely positioned dropdown that paints itself opaque still answers
+      // normally.
+      if (this.floatsOverPaintedSibling(node)) return undefined;
       node = node.parent;
       depth++;
     }
@@ -487,7 +551,7 @@ export class Palette {
     const white = parseColor(DEFAULT_BACKGROUND);
     if (white === null) return undefined;
     if (stack.length === 0) return { value: DEFAULT_BACKGROUND, provenance: 'default', from: el };
-    return this.composite(stack, white, topmost, undefined);
+    return { ...this.composite(stack, white, topmost, undefined), assumedBase: true };
   }
 
   /**
@@ -507,11 +571,79 @@ export class Palette {
     // contents — spent most of its scan comparing each one to all the others.
     let overlays = this.overlayCache.get(parent);
     if (overlays === undefined) {
-      overlays = parent.children.filter((c) => isStretchedOverlay(c) && paintsSomething(c));
+      overlays = parent.children.filter(
+        (c) => isStretchedOverlay(c, this.styles.get(c)?.box) && this.paintsSomething(c),
+      );
       this.overlayCache.set(parent, overlays);
     }
     for (const overlay of overlays) {
       if (overlay !== el) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Is this element taken out of flow and laid over a sibling that paints?
+   *
+   * Weaker than `isStretchedOverlay` on purpose: that one has to prove a box covers its
+   * siblings, which warrants demanding it be stretched across them. Here the element is
+   * already known to be the thing in front, and the only question is whether anything is
+   * behind it — for which `position: absolute` and one painted sibling is the whole test.
+   */
+  private floatsOverPaintedSibling(el: Element): boolean {
+    const cached = this.floatsCache.get(el);
+    if (cached !== undefined) return cached;
+    const answer = this.computeFloatsOver(el);
+    this.floatsCache.set(el, answer);
+    return answer;
+  }
+
+  private computeFloatsOver(el: Element): boolean {
+    const box = this.styles.get(el)?.box;
+    const classAttr = getAttr(el, 'class') ?? getAttr(el, 'className');
+    const classes = classAttr?.dynamic === true ? [] : (classAttr?.value ?? '').split(/\s+/);
+    const positioned =
+      box?.position === 'absolute' ||
+      box?.position === 'fixed' ||
+      classes.includes('absolute') ||
+      classes.includes('fixed');
+    if (!positioned) return false;
+    const parent = el.parent;
+    if (parent === null) return false;
+    for (const sib of parent.children) {
+      if (sib !== el && this.paintsSomething(sib)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Does this subtree put anything visible behind the text?
+   *
+   * Deliberately does **not** consult the resolved background, though the sibling test
+   * above now does read the cascade. Trying it both ways on the corpus settled it: taking
+   * any stylesheet background as proof of an overlay suppressed thirty more findings on
+   * fronts, of which only ten were inventions — the other twenty included grey-on-white
+   * at 2.78:1 and white on a mid-green badge at 4.23:1, which are exactly the findings
+   * this tool exists to make. A dropdown panel is absolutely positioned, full width and
+   * painted white, and it covers nothing until someone opens it. The near-white
+   * inventions this would have caught are handled where they belong, by the uncertainty
+   * guard in contrast.ts, which does not have to guess at stacking order to be right.
+   */
+  private paintsSomething(el: Element): boolean {
+    const stack: Element[] = [el];
+    let seen = 0;
+    while (stack.length > 0 && seen < 200) {
+      const node = stack.pop() as Element;
+      seen++;
+      if (node.tagLower === 'img' || node.tagLower === 'video' || node.tagLower === 'picture') return true;
+      const classAttr = getAttr(node, 'class') ?? getAttr(node, 'className');
+      const value = classAttr?.dynamic === true ? '' : (classAttr?.value ?? '');
+      if (/(^|\s)bg-\S/.test(value)) return true;
+      const style = getAttr(node, 'style');
+      if (style !== undefined && !style.dynamic && style.value !== null && /background/i.test(style.value)) {
+        return true;
+      }
+      stack.push(...node.children);
     }
     return false;
   }
@@ -642,38 +774,54 @@ function colourClass(classes: readonly string[], prefix: string): string | undef
 }
 
 /** `position: absolute|fixed` plus offsets that stretch the element over its parent. */
-function isStretchedOverlay(el: Element): boolean {
+/** `0`, `0px`, `0%`, `0rem` — anything that resolves to no offset at all. */
+function isZeroLength(value: string | undefined): boolean {
+  return value !== undefined && /^0(?:[a-z%]*)$/.test(value.trim());
+}
+
+/** `100%`, and the `100vw`/`100vh` a full-bleed overlay is just as often written with. */
+function isFullLength(value: string | undefined): boolean {
+  return value !== undefined && /^100(?:%|vw|vh)$/.test(value.trim());
+}
+
+/**
+ * Does this element cover its siblings?
+ *
+ * The box properties come from the cascade, so a rule in a stylesheet counts the same as
+ * a Tailwind class or an inline attribute. Before that they did not: the test read the
+ * class list for Tailwind's spellings and the `style` attribute for `inset:0`, which
+ * between them describe one framework and one abbreviation. Every site in the Russian
+ * corpus positions in a `.css` file, so the guard never fired for any of them and forty-
+ * five findings on one library's site said white text sat on near-white — under a
+ * photograph.
+ *
+ * Still deliberately narrow. Being wrong in this direction hides a real finding, so the
+ * element has to be both taken out of flow and stretched across what it covers.
+ */
+function isStretchedOverlay(el: Element, box: Record<string, string> | undefined): boolean {
   const classAttr = getAttr(el, 'class') ?? getAttr(el, 'className');
   const classes = classAttr?.dynamic === true ? [] : (classAttr?.value ?? '').split(/\s+/);
-  const positioned = classes.includes('absolute') || classes.includes('fixed');
-  const stretched =
+  const positioned =
+    classes.includes('absolute') ||
+    classes.includes('fixed') ||
+    box?.position === 'absolute' ||
+    box?.position === 'fixed';
+  if (!positioned) return false;
+
+  // `inset: 0` and `inset: 0 0 0 0` both mean the four offsets; anything with a non-zero
+  // component does not stretch and is left alone.
+  const inset = box?.inset;
+  const insetZero =
+    inset !== undefined && inset.split(/\s+/).every((part) => isZeroLength(part));
+
+  return (
     classes.includes('inset-0') ||
     (classes.includes('top-0') && classes.includes('bottom-0')) ||
-    (classes.includes('h-full') && classes.includes('w-full'));
-  if (positioned && stretched) return true;
-
-  const style = getAttr(el, 'style');
-  if (style === undefined || style.dynamic || style.value === null) return false;
-  const s = style.value.toLowerCase();
-  return /position\s*:\s*(absolute|fixed)/.test(s) && /\binset\s*:\s*0/.test(s);
+    (classes.includes('h-full') && classes.includes('w-full')) ||
+    insetZero ||
+    (isZeroLength(box?.top) && isZeroLength(box?.bottom)) ||
+    (isFullLength(box?.width) && isFullLength(box?.height))
+  );
 }
 
-/** Does this subtree put anything visible behind the text? */
-function paintsSomething(el: Element): boolean {
-  const stack: Element[] = [el];
-  let seen = 0;
-  while (stack.length > 0 && seen < 200) {
-    const node = stack.pop() as Element;
-    seen++;
-    if (node.tagLower === 'img' || node.tagLower === 'video' || node.tagLower === 'picture') return true;
-    const classAttr = getAttr(node, 'class') ?? getAttr(node, 'className');
-    const value = classAttr?.dynamic === true ? '' : (classAttr?.value ?? '');
-    if (/(^|\s)bg-\S/.test(value)) return true;
-    const style = getAttr(node, 'style');
-    if (style !== undefined && !style.dynamic && style.value !== null && /background/i.test(style.value)) {
-      return true;
-    }
-    stack.push(...node.children);
-  }
-  return false;
-}
+// paintsSomething is a method on Palette; see the class body.

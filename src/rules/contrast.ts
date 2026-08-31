@@ -46,6 +46,12 @@ interface Pair {
   readonly bgRgb: RGB;
 }
 
+/**
+ * Two colours a reader cannot tell apart. Not a design; the signature of a backdrop
+ * this tool could not see.
+ */
+const INDISTINGUISHABLE = 1.2;
+
 /** Resolve a usable colour pair, or nothing when either side is undetermined. */
 function pairFor(el: Element, ctx: { palette: import('../design/palette.js').Palette }): Pair | null {
   const fg = ctx.palette.foregroundFor(el);
@@ -71,7 +77,20 @@ function pairFor(el: Element, ctx: { palette: import('../design/palette.js').Pal
   //
   // The bar is deliberately just above nothing: grey on white at 2.5:1 is a real and
   // very common design mistake and stays reported.
+  //
   if (bg.provenance === 'default' && contrastRatio(fgRgb, bgRgb) < 1.5) return null;
+
+  // A translucent layer flattened onto that same assumption is not a measurement at all,
+  // at any ratio, so this one has no threshold.
+  //
+  // The arithmetic is exact and the input is invented: every layer in the stack is real,
+  // and the thing at the bottom is a guess. Worse, a layer is translucent precisely
+  // because something is meant to show through it — and what shows through is the thing
+  // we could not see. spbu.ru's slider is the case in point: `rgba(0,0,0,.2)` over a
+  // photograph, composited onto white, produced ten findings saying white text sits on
+  // #cccccc. Picking a ratio to exclude them would have been fitting a constant to one
+  // site; the defect is that we answered at all.
+  if (bg.assumedBase === true) return null;
 
   // The same argument, one step further, for a background that *was* declared.
   //
@@ -85,8 +104,15 @@ function pairFor(el: Element, ctx: { palette: import('../design/palette.js').Pal
   // The cost is a real invisible-text bug going unreported. That trade is the one this
   // tool takes everywhere else: a false finding in a paid report discredits the true
   // ones next to it, and a missed one costs only itself.
+  //
+  // Widened from "exactly the same hex" to "within a fiftieth of it" on the evidence of a
+  // wider corpus: white on #fbfbfb at 1.03:1 and white on #f4f5f6 at 1.09:1 are the same
+  // phenomenon as white on white and just as certainly not what those libraries ship. The
+  // ceiling stays far below the 2.5:1 where the real and common complaint lives, so
+  // nothing this tool exists to find comes near it.
   const bgOpaque: RGB = { ...bgRgb, a: 1 };
   if (toHex(flatten(fgRgb, bgOpaque)) === toHex(bgOpaque)) return null;
+  if (contrastRatio(flatten(fgRgb, bgOpaque), bgOpaque) < INDISTINGUISHABLE) return null;
 
   return { fg, bg, fgRgb, bgRgb };
 }
