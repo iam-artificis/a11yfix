@@ -188,7 +188,13 @@ const RU: Strings = {
     const kind = fixClass(v);
     const text = RULE_TEXT_RU[v.ruleId];
     if (text === undefined) return EN.remedy(v);
-    if (kind === 'manual') return { kind: UI_RU.kindManual, text: text.manual };
+    if (kind === 'manual') {
+      // A rule that declines to patch for more than one reason needs more than one
+      // sentence, or it states one reason about all of them.
+      const reason = v.fix?.reason;
+      const chosen = (reason !== undefined ? text.manualByReason?.[reason] : undefined) ?? text.manual;
+      return { kind: UI_RU.kindManual, text: chosen };
+    }
     const swaps = editSummary(v.fix);
     const body = text.patch ?? text.manual;
     return {

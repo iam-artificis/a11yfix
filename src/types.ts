@@ -48,6 +48,20 @@ export interface Fix {
    * large enough that a human should choose it. Carries the suggestion anyway.
    */
   readonly advisory?: string;
+  /**
+   * Why no edit is offered, as a stable code rather than as prose.
+   *
+   * A rule can decline for several different reasons, and the English advisory says which
+   * because it is composed per finding. The Russian report writes one hand-written
+   * sentence per rule, and for contrast that sentence said "the smallest change turned out
+   * to be large enough to alter the design" — on every manual finding, including the ones
+   * whose own analysis says the opposite. On the museum audit that was 207 findings, and
+   * ten of the twelve remedy sentences a reader actually sees.
+   *
+   * A code, not a message: the point is to pick between whole sentences somebody wrote,
+   * not to assemble one out of fragments.
+   */
+  readonly reason?: string;
 }
 
 export interface Violation {

@@ -62,8 +62,21 @@ test('no Russian text is left as a stub or a copy of the English', () => {
     assert.ok(t.impact.length > 0, `${rule.id}: empty impact`);
     assert.ok(t.manual.length > 0, `${rule.id}: empty manual remedy`);
     // Cyrillic somewhere in every field, so an untranslated placeholder cannot pass.
+    // `manualByReason` holds one whole sentence per reason a rule can decline to patch,
+    // and each of those is client-facing text in its own right, so it is walked into
+    // rather than skipped.
     for (const [field, value] of Object.entries(t)) {
-      assert.match(value, /[а-яА-ЯёЁ]/, `${rule.id}.${field} has no Russian in it: ${value}`);
+      if (typeof value === 'string') {
+        assert.match(value, /[а-яА-ЯёЁ]/, `${rule.id}.${field} has no Russian in it: ${value}`);
+        continue;
+      }
+      for (const [reason, sentence] of Object.entries(value)) {
+        assert.match(
+          sentence,
+          /[а-яА-ЯёЁ]/,
+          `${rule.id}.${field}.${reason} has no Russian in it: ${sentence}`,
+        );
+      }
     }
   }
 });
@@ -171,4 +184,66 @@ test('Russian counts land in the right case', () => {
   const one = render(summaryOf('page.html', '<!DOCTYPE html><html><head></head><body><img src="a.png"></body></html>'), 'ru');
   assert.match(one, /проверено: 1 файл /, 'the subline should read "1 файл", not "1 файлов"');
   assert.match(one, / в 1 файле\./, '"в" takes the prepositional case');
+});
+
+/**
+ * A Russian remedy must not assert a reason the tool's own analysis contradicts.
+ *
+ * The Russian report writes one hand-written sentence per rule, which is right — assembled
+ * prose reads as machine output. But contrast declines to patch for three different
+ * reasons, and one sentence then states one of them about all of them. On the museum audit
+ * that was 205 findings telling the client the minimal change was "large enough to alter
+ * the design" when the tool had computed the opposite: an imperceptible blue shift it
+ * could not write because the colour is not in a rewritable form.
+ */
+
+const remedyFor = (css, body) => {
+  const source = `<!DOCTYPE html><html lang="ru"><head><title>т</title></head><body><main><h1>з</h1>${body}</main></body></html>`;
+  const { violations } = analyseSource('page.html', source, {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: null,
+    stylesheets: [{ file: 's.css', content: css }],
+  });
+  const v = violations.find((x) => x.ruleId === 'A11Y-COLOR-001');
+  assert.ok(v !== undefined, 'expected a contrast finding to talk about');
+  return { v, ru: strings('ru').remedy(v), en: strings('en').remedy(v) };
+};
+
+test('a colour that cannot be rewritten in place does not blame the design', () => {
+  // The colour arrives through a custom property, so there is no literal to edit — the
+  // change itself would be tiny.
+  const css = `:root { --brand: #0d6efd; }
+               .b { background: #f0f0f0; }
+               .b p { color: var(--brand); font-size: 16px; }`;
+  const { v, ru } = remedyFor(css, '<div class="b"><p>Т</p></div>');
+  if (v.fix?.safety !== 'manual') return; // resolved to a literal; nothing to assert
+  assert.equal(v.fix.reason, 'not-rewritable');
+  assert.ok(
+    !/поменять оформление/.test(ru.text),
+    `the remedy must not claim a design change: ${ru.text}`,
+  );
+  assert.match(ru.text, /не может переписать его на месте/);
+});
+
+test('a genuinely disruptive change still says so', () => {
+  const css = `.b { background: #ff0000; } .b p { color: #ff5050; font-size: 16px; }`;
+  const { v, ru } = remedyFor(css, '<div class="b"><p>Т</p></div>');
+  if (v.fix?.reason !== 'design-change') return;
+  assert.match(ru.text, /поменять оформление/);
+});
+
+test('every manual reason a rule can emit has a Russian sentence of its own', () => {
+  // The guard that keeps this from rotting: a new reason code with no Russian text falls
+  // back to the generic sentence, which is the failure this test exists to catch.
+  const REASONS = ['design-change', 'not-rewritable', 'no-lightness-fix'];
+  const text = RULE_TEXT_RU['A11Y-COLOR-001'];
+  for (const reason of REASONS) {
+    assert.ok(
+      text.manualByReason?.[reason] !== undefined,
+      `A11Y-COLOR-001 has no Russian sentence for reason "${reason}"`,
+    );
+  }
+  const said = new Set(Object.values(text.manualByReason ?? {}));
+  assert.equal(said.size, REASONS.length, 'each reason needs its own sentence, not a shared one');
 });

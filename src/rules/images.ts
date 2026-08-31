@@ -365,10 +365,39 @@ function normalise(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-/** Reduce to comparable letters and digits, so "hero-2x" and "Hero 2X" match. */
+/**
+ * Reduce to comparable letters and digits, so "hero-2x" and "Hero 2X" match.
+ *
+ * Letters in every script, not `[^a-z0-9]`. The ASCII version annihilated any Cyrillic
+ * alt down to whatever Latin it happened to contain, so
+ * `alt="Rutube-канал Российской Государственной Библиотеки Искусств"` on `rutube.png`
+ * reduced to `rutube` and was reported as a file name dumped into the alt — while the
+ * English `alt="Rutube — official channel"` on the same file stayed silent. This is the
+ * same assumption as the `[^A-Za-z]` bug three functions above, and it fails the same way:
+ * only ever on an alt that contains real description, so every false positive it produces
+ * lands on one of the best alt texts on the page.
+ */
 function squash(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
+
+/**
+ * Does this file name look like something a machine chose?
+ *
+ * The point of the rule is an author who pasted the file name in rather than describing
+ * the picture. But a great many files are named after what they are — `max.svg`,
+ * `vk.svg`, `rutube.png` — and for a service icon the service's name is the correct alt,
+ * not a lazy one. Ten findings on three sites were social and contact icons named after
+ * their destination, which is the recommended pattern, and the worst pair sat on adjacent
+ * lines of one page: two <img> with the identical `alt="max"`, one flagged and one not,
+ * because the other file happened to be `max-white.svg`. A client who checks one line
+ * finds the report contradicting itself.
+ *
+ * So the stem has to carry the marks of a machine — a digit, an underscore, or more than
+ * one hyphen. A single plain word does not, and the classic camera and extension dumps
+ * are already caught above.
+ */
+const MACHINE_STEM = /\d|_|-.*-/;
 
 /** File name of a src, without query string, directory or extension. */
 function srcStem(src: string): string {
@@ -392,8 +421,11 @@ function placeholderReason(alt: string, src: string | null): string | null {
   if (PLACEHOLDER_ALT.has(n)) return 'is a generic placeholder';
   if (NO_WORDS.test(n)) return 'contains no words';
   if (src !== null) {
-    const stem = squash(srcStem(src));
-    if (stem.length >= 3 && stem === squash(n)) return 'repeats the file name from src';
+    const raw = srcStem(src);
+    const stem = squash(raw);
+    if (stem.length >= 3 && stem === squash(n) && MACHINE_STEM.test(raw)) {
+      return 'repeats the file name from src';
+    }
   }
   return null;
 }

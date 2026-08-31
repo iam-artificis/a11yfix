@@ -119,4 +119,14 @@ export interface RuleText {
   readonly patch?: string;
   /** What a person has to do, where no patch can be offered. */
   readonly manual: string;
+  /**
+   * Alternatives to `manual`, chosen by `Fix.reason`.
+   *
+   * Each is a whole sentence somebody wrote, not a fragment to be assembled — the ban in
+   * this file's header is on composing Russian prose out of parts, and picking between
+   * finished sentences is not that. Needed because one rule can decline to patch for
+   * several different reasons, and a single sentence then has to state one of them about
+   * all of them. Contrast stated the wrong one 207 times.
+   */
+  readonly manualByReason?: Readonly<Record<string, string>>;
 }

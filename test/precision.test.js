@@ -681,3 +681,77 @@ test('a scheme with no authority compares as itself', () => {
   assert.equal(found.length, 2);
   assert.deepEqual(ambiguous('<a href="mailto:a@x.ru">Почта</a><a href="mailto:a@x.ru">Почта</a>'), []);
 });
+
+/**
+ * The filename-echo branch, which could only ever misfire on a good alt.
+ *
+ * `squash` reduced to `[a-z0-9]`, so any Cyrillic alt collapsed to whatever Latin it
+ * happened to contain. And the branch fired on any file named after its subject, which is
+ * how a great many icons are named — so the correct alt for a service icon was reported
+ * as a file name dumped into the attribute.
+ */
+
+const clean = (body) =>
+  `<!DOCTYPE html><html lang="ru"><head><title>т</title></head><body><main><h1>з</h1>${body}</main></body></html>`;
+const violationsIn = (source) => run('page.html', source).violations;
+const idsIn = (source) => violationsIn(source).map((v) => v.ruleId);
+
+test('a Cyrillic alt is not a file name because it contains the file name', () => {
+  const src = clean(
+    '<img src="/upload/rutube.png" alt="Rutube-канал Российской государственной библиотеки искусств">',
+  );
+  assert.deepEqual(idsIn(src).filter((id) => id === 'A11Y-IMG-002'), []);
+});
+
+test('the English alt on the same file is treated the same way', () => {
+  const src = clean('<img src="/upload/rutube.png" alt="Rutube — official channel">');
+  assert.deepEqual(idsIn(src).filter((id) => id === 'A11Y-IMG-002'), []);
+});
+
+test('a service icon named after the service is a correct alt, not a file name', () => {
+  // nlr.ru had two of these on adjacent lines with the identical alt="max", one flagged
+  // and one not, because the other file was max-white.svg.
+  for (const src of ['/upload/iblock/06d/max.svg', '/upload/iblock/06d/max-white.svg']) {
+    assert.deepEqual(
+      idsIn(clean(`<a href="https://max.ru/rusmuseum" aria-label="Max"><img src="${src}" alt="Max"></a>`))
+        .filter((id) => id === 'A11Y-IMG-002'),
+      [],
+      `${src} should not be reported`,
+    );
+  }
+});
+
+test('a file name that looks machine-chosen is still caught', () => {
+  // The fault the rule exists for: the author pasted the file name in.
+  const src = clean('<img src="/i/hero-banner-2x.png" alt="hero-banner-2x">');
+  assert.ok(idsIn(src).includes('A11Y-IMG-002'), 'a pasted file name is still a placeholder');
+});
+
+test('a link named only by an unlabelled svg says so in terms an svg has', () => {
+  // <svg> has no alt attribute in any specification; advising one is advice nobody can
+  // follow. www.darwinmuseum.ru line 87 is the live case.
+  const src = clean('<a href="/"><svg viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg></a>');
+  const found = violationsIn(src).filter((v) => v.ruleId === 'A11Y-LINK-001');
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /<svg> with no title or label/);
+  assert.ok(!/alt/.test(found[0].message), 'must not tell the reader to add alt to an svg');
+  assert.match(found[0].fix.advisory, /<title>/);
+});
+
+test('a label on any descendant names the link, not only one on an image', () => {
+  // The standard way to caption a CSS background image, and what Drupal and Bitrix emit.
+  const src = clean('<a href="/news/1/"><div role="img" aria-label="Менделеев 2026"></div></a>');
+  assert.deepEqual(idsIn(src).filter((id) => id === 'A11Y-LINK-001'), []);
+});
+
+test('aria-labelledby on a descendant names the link too', () => {
+  const src = clean(
+    '<span id="t1">Купить билет</span><a href="/tickets/"><span aria-labelledby="t1"></span></a>',
+  );
+  assert.deepEqual(idsIn(src).filter((id) => id === 'A11Y-LINK-001'), []);
+});
+
+test('a genuinely empty link is still reported', () => {
+  const src = clean('<a href="/news/1/"><div class="card"></div></a>');
+  assert.ok(idsIn(src).includes('A11Y-LINK-001'), 'the rule must still fire when nothing names the link');
+});

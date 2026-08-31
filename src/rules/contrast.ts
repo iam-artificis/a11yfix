@@ -373,6 +373,7 @@ const textContrast: Rule = {
             safety: 'manual',
             edits: [],
             description: 'Contrast can be reached, but not without a visible design change.',
+            reason: repair.disruptive ? 'design-change' : 'not-rewritable',
             advisory:
               `The smallest change that reaches ${required}:1 moves the ${repair.moved} to ${newHex}. ` +
               (repair.disruptive
@@ -385,6 +386,7 @@ const textContrast: Rule = {
           safety: 'manual',
           edits: [],
           description: 'No lightness adjustment of either colour reaches the required ratio.',
+          reason: 'no-lightness-fix',
           advisory: `This pair cannot reach ${required}:1 by changing lightness alone. Pick a different colour.`,
         };
       }

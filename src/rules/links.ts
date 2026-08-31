@@ -353,19 +353,32 @@ const emptyLink: Rule = {
       if (title.present && (title.dynamic || title.value.trim() !== '')) continue;
 
       let unlabelledImage: Element | null = null;
-      let namedImage = false;
+      let named = false;
       walk(el, (child) => {
+        // A label on *any* descendant names the link, not only one on an <img> or <svg>.
+        //
+        // The walk used to return immediately for every other tag, so
+        // `<a><div role="img" aria-label="Менделеев 2026"></div></a>` — the standard way
+        // to caption a CSS background image, and what Drupal and Bitrix themes emit
+        // everywhere — was reported as having "no text, no aria-label and no labelled
+        // content". The third clause was a claim the code never checked. Twenty-eight
+        // findings on one university's front page, every one at error severity, and each
+        // carrying an edit that --mark-todos would have used to write
+        // aria-label="A11YFIX-TODO…" over a link that was already named.
+        const label = readAttr(child, 'aria-label');
+        if ((label.present && (label.dynamic || label.value.trim() !== '')) || hasAttr(child, 'aria-labelledby')) {
+          named = true;
+          return;
+        }
         if (child.tagLower !== 'img' && child.tagLower !== 'svg') return;
         const alt = readAttr(child, 'alt');
-        const label = readAttr(child, 'aria-label');
-        const labelled =
-          (alt.present && (alt.dynamic || alt.value.trim() !== '')) ||
-          (label.present && (label.dynamic || label.value.trim() !== '')) ||
-          hasAttr(child, 'aria-labelledby');
-        if (labelled) namedImage = true;
-        else if (unlabelledImage === null) unlabelledImage = child;
+        if (alt.present && (alt.dynamic || alt.value.trim() !== '')) {
+          named = true;
+          return;
+        }
+        if (unlabelledImage === null) unlabelledImage = child;
       });
-      if (namedImage) continue;
+      if (named) continue;
 
       const span = elementSpan(el);
       if (unlabelledImage !== null) {
@@ -380,7 +393,15 @@ const emptyLink: Rule = {
             severity: emptyLink.severity,
             start: span.start,
             end: span.end,
-            message: 'Link contains only an image with no alt text, so it has no accessible name.',
+            // An <svg> has no alt attribute in any specification, so telling a developer
+            // to add one is advice they cannot follow: they write it, it does nothing,
+            // and the fault ships with a tick beside it. The name for inline SVG comes
+            // from a child <title> or from aria-label. Reachable on real sites — the
+            // Darwin Museum's logo link is `<a href="/"><svg id="logo_svg_top">`.
+            message:
+              (unlabelledImage as Element).tagLower === 'svg'
+                ? 'Link contains only an <svg> with no title or label, so it has no accessible name.'
+                : 'Link contains only an image with no alt text, so it has no accessible name.',
             impact:
               'A screen reader announces "link" and then the image file name, or nothing at all, so the only way to find out where the link goes is to follow it and come back.',
             fix: {
@@ -388,7 +409,9 @@ const emptyLink: Rule = {
               edits: [],
               description: 'Name the link from the image it contains.',
               advisory:
-                'Give the <img> alt text describing the link destination (not the picture), or put aria-label on the <a> and alt="" on the image. Only someone who knows the destination can write it.',
+                (unlabelledImage as Element).tagLower === 'svg'
+                  ? 'Put a <title> as the first child of the <svg> describing the link destination (not the drawing), or aria-label on the <a> and aria-hidden="true" on the <svg>. Only someone who knows the destination can write it.'
+                  : 'Give the <img> alt text describing the link destination (not the picture), or put aria-label on the <a> and alt="" on the image. Only someone who knows the destination can write it.',
             },
           }),
         );
