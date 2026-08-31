@@ -1018,6 +1018,11 @@ const ambiguousLinkNames: Rule = {
       if (name.opaque) continue;
       const key = normalizeText(name.text);
       if (key === '') continue;
+      // Our own placeholder is the same string on every link the patch touched — that is
+      // what makes it a placeholder. Reporting seven of them as "one name, seven
+      // destinations" reports the marker, not the page. A11Y-TODO-001 already does, and
+      // says the thing worth saying: write the real name here.
+      if (name.text.includes(TODO_MARKER)) continue;
 
       const existing = groups.get(key);
       if (existing === undefined) {
@@ -1254,6 +1259,10 @@ const adjacentDuplicateLinks: Rule = {
         if (!a.present || !b.present || a.dynamic || b.dynamic) continue;
         const dest = a.value.trim();
         if (dest === '' || dest !== b.value.trim()) continue;
+        // Two anchors that A11Y-KBD-009 gave the same placeholder href are two links with
+        // no destination yet, not one destination written twice. Merging them, which is
+        // what this rule advises, would be the wrong repair.
+        if (dest.includes(TODO_MARKER)) continue;
 
         // "Adjacent" must mean nothing readable sits between them; text in between makes
         // the second link a separate, legitimate mention.

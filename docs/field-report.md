@@ -195,16 +195,16 @@ near-clean result.
 |---|---|---|---|---|---|
 | `shm.ru` | 114 | 2 | 200 | 4 | 316 |
 | `spbu.ru` | 138 | 2 | 49 | 2 | 189 |
-| `rsl.ru` | 60 | 20 | 80 | — | 160 |
 | `obrnadzor.gov.ru` | 71 | 12 | 97 | — | 180 |
-| `nlr.ru` | 13 | 4 | 82 | 2 | 99 |
+| `rsl.ru` | 60 | 20 | 83 | — | 163 |
+| `nlr.ru` | 13 | 4 | 103 | 2 | 120 |
 | `tretyakovgallery.ru` | 27 | 1 | 68 | — | 96 |
-| `rusmuseum.ru` | 4 | 5 | 27 | — | 36 |
-| `libnn.ru` | 15 | 7 | 11 | — | 33 |
+| `rusmuseum.ru` | 4 | 5 | 32 | — | 41 |
+| `libnn.ru` | 15 | 7 | 12 | — | 34 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1111 total with the same suspicion the cal.com row deserves. 243 findings are
-`target="_blank"` without `rel="noopener"` and 230 are a new window opened without
+Read the 1141 total with the same suspicion the cal.com row deserves. 243 findings are
+`target="_blank"` without `rel="noopener"` and 260 are a new window opened without
 warning — conventions, and on this evidence near-universal ones. Both are reported as
 information rather than as faults, for exactly that reason. Strip them and 638 remain, of
 which the part that actually blocks somebody is:
@@ -224,8 +224,10 @@ whether it is worth fixing depends on the page.
 
 ### The measurement corrected itself, downward, three times
 
-An earlier run of this table read 1345, then 1198, and the difference is not the sites
-changing.
+An earlier run of this table read 1345, then 1198, then 1111, and the difference is not
+the sites changing. The last move was upward, which is the only one of the four that added
+findings rather than removing them; it is described last, and it is the one I would read
+first.
 
 The placeholder-alt rule tested for "contains no letters" with `[^A-Za-z]`, which is a
 claim that only the Latin alphabet contains words. `alt="Логотип Государственного
@@ -264,8 +266,39 @@ on one university. And the redundant-prefix rule learned the Russian its own sum
 always claimed it read, which is where the 15 new ones above come from: `alt="Изображение
 новости …"` is exactly the fault the rule exists for, in the corpus, silently missed.
 
-All three were found the same way: by looking at what the tool said about a real site in
-the segment it is sold into, one finding at a time. None was reachable from a unit test.
+The fourth came from a different question, and it is the reason this section now ends
+upward instead of downward. A report that overstates costs credibility; a patch that
+corrupts a client's source costs the client. So: apply every fix the tool is willing to
+write, to every page of the pinned corpus, and check that what comes out is still the same
+document. That found three defects a forty-five-agent audit of the same code had walked
+straight past, and all three were one cause — `textOf` stripped tags with `/<[^>]*>/g`, so
+a `>` inside a quoted attribute value ended the tag early and the rest of it came back as
+the element's *text*.
+
+- On `unn.ru`, 24 real findings sat inside an HTML comment the stripper had cut open, and
+  were never reported at all.
+- On `alexandrinsky.ru`, a commented-out link nested inside a live one produced the link
+  name `Подробнее -->`, reported four times as uninformative link text.
+- On `pushkinmuseum.ru`, an `alt` containing `<br>` leaked half of itself back out, and
+  `Буддийское искусство России">` was printed in a report as a link's name.
+
+Fixing that exposed the gap it had been hiding. `<a href="…"><img alt="…"></a>` is named by
+that `alt` — that is the accessible name computation, and it is how nearly every museum
+front page here names its slider links. The tool read only text, so all of them were
+nameless, and every rule that needs a name to say anything fell silent on exactly the links
+a museum's front page is made of. That is where the 30 new findings between 1111 and 1141
+come from, all of them the same rule: 30 more new windows opened without warning, on links
+that finally had a name to judge.
+
+The same pass cut in the other direction on the wider corpus, where these nine pages happen
+to have no instances. `aria-hidden` on an ancestor now silences the naming rules — a
+decorative duplicate that nothing announces cannot fail to announce anything — and that
+removed 30 findings that were wrong across the rest of the Russian set. Net over all
+sixteen thousand: +288, of which 304 are information and 21 are warnings that went away.
+
+All four were found the same way: by looking at what the tool did to a real site in the
+segment it is sold into, one finding at a time. None was reachable from a unit test — though
+each is now covered by one.
 
 ### The finding the whole rule set is built around
 
@@ -315,14 +348,14 @@ three hundred and ten it lists, taken at an even stride across the list:
 npx a11yfix --sitemap https://shm.ru/sitemap.xml --lang ru --report audit.html
 ```
 
-**4832 findings across 48 pages** — 2326 errors, 63 warnings, 2443 info — in
-twenty-six seconds, including the fetching. Five rules account for 3890 of them:
+**4851 findings across 48 pages** — 2326 errors, 63 warnings, 2462 info — in
+twenty-six seconds, including the fetching. Five rules account for 3897 of them:
 1362 links opening a new window with no `rel`, 782 links with no discernible text,
-617 unannounced new windows, 608 images with no `alt` at all, 521 buttons with no
-accessible name. Seventeen other rules divide the remaining 942 between them.
+624 unannounced new windows, 608 images with no `alt` at all, 521 buttons with no
+accessible name. Seventeen other rules divide the remaining 954 between them.
 
 Two of those five are conventions rather than barriers and are reported as information,
-which is what makes the report's own headline 2389 rather than 4832. That distinction was
+which is what makes the report's own headline 2389 rather than 4851. That distinction was
 made here, on this measurement: `rel="noopener"` was a warning until 1362 of a museum's
 findings turned out to be it — a quarter of an accessibility audit spent on a token with
 no WCAG criterion behind it, which every browser has implied by default since early 2021.
@@ -336,8 +369,8 @@ Two things about that number are worth stating plainly, because both cut against
 
 Most of it is one template repeated. The per-page table in the report makes this
 unmissable. Below the front page — its own layout, and the worst at 316 — forty-six of the
-remaining forty-seven run between 93 and 124 findings each, across excursions,
-exhibitions, education and the research department: a spread of thirty-one on pages that have
+remaining forty-seven run between 94 and 124 findings each, across excursions,
+exhibitions, education and the research department: a spread of thirty on pages that have
 nothing in common but their template. That is not forty-eight problems. It is a handful of
 problems in a shared header, footer and card, multiplied by forty-eight. The honest way to
 sell against this number is that the fix is far smaller than the count, not that the site

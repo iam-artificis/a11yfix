@@ -178,8 +178,27 @@ function eventOf(a: Attr): string | null {
   return n === '' ? null : n;
 }
 
+/**
+ * True for a click handler bound to the document rather than to this element.
+ *
+ * Alpine's `.away` and `.outside` modifiers invert the subject: `@click.away="open =
+ * false"` closes a dropdown when the user clicks *anywhere but here*. The element is what
+ * is being clicked away from — a container — so reading it as a control is a finding about
+ * markup that is correct as written. mxat.ru wraps three menus in exactly this, and they
+ * only surfaced after another patch removed a redundant `role="listitem"` that had been
+ * accidentally suppressing them.
+ */
+function isAwayModifier(a: Attr): boolean {
+  const dot = a.nameLower.indexOf('.');
+  if (dot < 0) return false;
+  return a.nameLower
+    .slice(dot + 1)
+    .split('.')
+    .some((m) => m === 'away' || m === 'outside');
+}
+
 function clickAttrOf(el: Element): Attr | undefined {
-  return el.attrs.find((a) => eventOf(a) === 'click');
+  return el.attrs.find((a) => eventOf(a) === 'click' && !isAwayModifier(a));
 }
 
 function hasKeyHandler(el: Element): boolean {

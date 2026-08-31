@@ -409,3 +409,55 @@ test('a TODO marker in an href is not also reported as a broken fragment link', 
     'and the marker is still reported, by the rule that owns it',
   );
 });
+
+
+test('a click-away handler does not make a container a control', () => {
+  // Alpine's .away modifier binds the listener to the document: @click.away="open = false"
+  // closes a dropdown when the user clicks *anywhere but here*. The element is what is
+  // being clicked away from. mxat.ru wraps three menus in exactly this, correct as
+  // written, and the tool called each one "a control by appearance only".
+  for (const attr of ['@click.away', '@click.outside', 'v-on:click.away']) {
+    const source =
+      '<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><h1>h</h1>' +
+      `<ul><li ${attr}="open = false">Menu</li></ul></main></body></html>`;
+    const found = run('page.html', source).violations.filter((v) => v.ruleId === 'A11Y-KBD-002');
+    assert.equal(found.length, 0, `${attr} is not a click handler on this element`);
+  }
+});
+
+test('a real click handler beside a click-away one is still reported', () => {
+  // The guard must skip the .away attribute, not the element: a dropdown that both opens
+  // on click and closes on click-away still needs to be reachable.
+  const source =
+    '<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><h1>h</h1>' +
+    '<div @click.away="open = false" @click="open = true">Menu</div></main></body></html>';
+  const found = run('page.html', source).violations.filter((v) => v.ruleId === 'A11Y-KBD-002');
+  assert.equal(found.length, 1);
+});
+
+test('no rule judges the placeholder a patch wrote as if a person had written it', () => {
+  // Three rules used to. LINK-006 read seven identical markers as "one name, seven
+  // destinations"; LINK-009 read two placeholder hrefs as one destination repeated and
+  // advised merging the links; LINK-008 read the marker as a fragment with no target.
+  // Each is our own text, and A11Y-TODO-001 already reports it saying the useful thing.
+  const source =
+    '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Тест</title></head>' +
+    '<body><main><h1>Заголовок</h1>' +
+    '<a href="https://vk.com/x"><img src="a.svg"></a>' +
+    '<a href="https://ok.ru/y"><img src="b.svg"></a>' +
+    '<a onclick="a()">Раз</a><a onclick="b()">Два</a>' +
+    '</main></body></html>';
+  const patched = analyseSource('page.html', source, {
+    rules: ALL_RULES, level: 'AA', fixThreshold: 'manual', markTodos: true,
+  }).fixedSource;
+  assert.ok(patched.includes(TODO_MARKER), 'the patch should plant markers');
+
+  const after = run('page.html', patched).violations;
+  for (const id of ['A11Y-LINK-006', 'A11Y-LINK-008', 'A11Y-LINK-009']) {
+    assert.equal(
+      after.filter((v) => v.ruleId === id).length, 0,
+      `${id} fired on a placeholder this tool wrote`,
+    );
+  }
+  assert.ok(after.some((v) => v.ruleId === 'A11Y-TODO-001'), 'the markers are still reported');
+});
