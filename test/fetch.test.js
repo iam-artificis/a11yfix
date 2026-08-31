@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fetchPage, fetchSitemap, isUrl, spread } from '../dist/fetch.js';
+import { fetchPage, fetchSitemap, isUrl, spread, isIncompleteChain, caIssuersFrom } from '../dist/fetch.js';
 
 /**
  * Reading a live URL is the mode that decides whether a stranger can ask a question at
@@ -522,5 +522,67 @@ test('a site audit is titled after the site, and counts pages rather than files'
         rmSync(out, { force: true });
       }
     },
+  );
+});
+
+
+/**
+ * Completing a certificate chain the server did not send.
+ *
+ * Six of the forty-nine Russian institutional sites in the measurement corpus could not
+ * be opened at all, with `unable to verify the first certificate`. Their certificates are
+ * ordinary commercial ones; their servers send the leaf and omit the intermediate, and
+ * every browser papers over it by fetching the missing link from the address inside the
+ * certificate. Node does not, so the tool failed at the exact moment somebody tries it
+ * for the first time.
+ *
+ * The repair itself is verified against the live web — six real hosts recovered, and
+ * expired / self-signed / wrong-host / untrusted-root all still refused. What is checked
+ * here is the two pieces that decide whether it ever runs, because both have failed
+ * silently once already: the error shape, and the address parse.
+ */
+
+test('the incomplete-chain error is recognised in both shapes Node reports it in', () => {
+  // fetch() buries it one level down; https.request puts it on the error itself.
+  assert.ok(isIncompleteChain(Object.assign(new Error('fetch failed'), {
+    cause: Object.assign(new Error('unable to verify the first certificate'), {
+      code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    }),
+  })));
+  assert.ok(isIncompleteChain(Object.assign(new Error('x'), { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' })));
+});
+
+test('every other trust failure is left alone', () => {
+  // Repairing these would mean loading a page whose certificate is genuinely not to be
+  // believed, which is a far worse failure than declining to read it.
+  for (const code of [
+    'CERT_HAS_EXPIRED',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+    'ECONNREFUSED',
+    undefined,
+  ]) {
+    assert.equal(isIncompleteChain({ cause: { code } }), false, `${code} must not be repaired`);
+  }
+  assert.equal(isIncompleteChain(undefined), false);
+  assert.equal(isIncompleteChain(new Error('plain')), false);
+});
+
+test('the issuer address is read out of the extension, and only from the right line', () => {
+  const real =
+    'OCSP - URI:http://ocsp.globalsign.com/gsgccr6alphasslca2025\n' +
+    'CA Issuers - URI:http://secure.globalsign.com/cacert/gsgccr6alphasslca2025.crt\n';
+  assert.equal(
+    caIssuersFrom(real),
+    'http://secure.globalsign.com/cacert/gsgccr6alphasslca2025.crt',
+    'the OCSP responder is not the issuer, and fetching it would return something that is not a certificate',
+  );
+  assert.equal(caIssuersFrom(undefined), undefined);
+  assert.equal(caIssuersFrom('OCSP - URI:http://ocsp.example/'), undefined, 'no issuer named');
+  assert.equal(
+    caIssuersFrom('CA Issuers - URI:ldap://directory.example/cn=CA'),
+    undefined,
+    'only addresses we can actually fetch',
   );
 });

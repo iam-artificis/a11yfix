@@ -21,6 +21,10 @@
 
 import type { StylesheetSource } from './design/palette.js';
 import { gunzipSync } from 'node:zlib';
+import { connect as tlsConnect, rootCertificates } from 'node:tls';
+import { request as httpsRequest } from 'node:https';
+import { get as httpGet } from 'node:http';
+import { X509Certificate } from 'node:crypto';
 import { parseMarkup } from './parse/markup.js';
 
 /** A page is not worth reading past this; a stylesheet even less so. */
@@ -69,47 +73,349 @@ function readable(err: unknown): string {
   return String(err);
 }
 
-async function get(
+/**
+ * Completing a certificate chain the server did not send.
+ *
+ * Six of the forty-nine Russian institutional sites in the measurement corpus refused to
+ * be read at all, with `unable to verify the first certificate`. Nothing about them is
+ * untrusted: they hold ordinary commercial certificates. Their servers send the leaf and
+ * stop, omitting the intermediate that links it to the root. Browsers have papered over
+ * this for years — they read the address out of the leaf's Authority Information Access
+ * extension, fetch the missing certificate and carry on — so nobody at those institutions
+ * has any reason to know their server is misconfigured, and no visitor ever finds out.
+ *
+ * Node does not do this, and the result was one site in eight failing at the exact
+ * moment the tool is being tried for the first time.
+ *
+ * So we do what the browser does and no more:
+ *
+ *  - only after a request has already failed with UNABLE_TO_VERIFY_LEAF_SIGNATURE;
+ *  - only the certificate the leaf itself names, at the address the leaf itself gives;
+ *  - and then the request is retried with verification fully on, so the completed chain
+ *    still has to reach a root in Node's own store. Nothing is trusted that would not
+ *    have been trusted had the server been configured correctly.
+ *
+ * What this deliberately does not do is rescue a site whose root is not in Node's store
+ * at all. A page signed by a national CA nobody else carries still fails after this, and
+ * should: trusting a new root is a decision for the person running the tool to make out
+ * loud, not something a network library arranges on their behalf.
+ */
+
+/** A certificate is a few kilobytes. Anything of this size is not one. */
+const MAX_CERT_BYTES = 64 * 1024;
+const MAX_REDIRECTS = 5;
+
+/** Intermediates already fetched, by host, so a fifty-page scan pays for this once. */
+const repairedChains = new Map<string, readonly string[]>();
+
+/**
+ * The one error code this repair applies to; anything else is a real trust failure.
+ *
+ * Exported for the tests: the shape matters more than the value. `fetch` reports the
+ * useful part one level down, as `cause.code`, and a direct `https.request` reports it
+ * on the error itself, so both have to be read or the repair silently never runs.
+ */
+export function isIncompleteChain(err: unknown): boolean {
+  const e = err as { code?: unknown; cause?: { code?: unknown } };
+  const code = e?.cause?.code ?? e?.code;
+  return code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE';
+}
+
+/**
+ * Ask the server for its leaf without judging it, purely to read where the missing
+ * certificate lives. This connection carries nothing and is closed immediately.
+ */
+function issuerUrl(host: string, port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const socket = tlsConnect(
+      { host, port, servername: host, rejectUnauthorized: false, timeout: TIMEOUT_MS },
+      () => {
+        const leaf = socket.getPeerCertificate(true) as {
+          infoAccess?: Record<string, string[] | undefined>;
+        };
+        socket.destroy();
+        const uris = leaf?.infoAccess?.['CA Issuers - URI'] ?? [];
+        // AIA addresses are plain http by design: the certificate served there is itself
+        // signed, so it does not need the transport to vouch for it, and requiring https
+        // would be a chicken-and-egg problem.
+        resolve(uris.find((u) => u.startsWith('http://') || u.startsWith('https://')));
+      },
+    );
+    socket.on('error', () => resolve(undefined));
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(undefined);
+    });
+  });
+}
+
+/** CAs serve DER; X509Certificate parses it and can print the PEM that tls wants. */
+function downloadCertificate(url: string): Promise<X509Certificate | undefined> {
+  return new Promise((resolve) => {
+    const req = httpGet(url, { timeout: TIMEOUT_MS }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        resolve(undefined);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on('data', (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_CERT_BYTES) {
+          req.destroy();
+          resolve(undefined);
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on('end', () => {
+        try {
+          resolve(new X509Certificate(Buffer.concat(chunks)));
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(undefined);
+    });
+  });
+}
+
+/**
+ * The address of the issuing certificate, read out of a certificate we already have.
+ *
+ * `X509Certificate.infoAccess` is the extension printed as text, one entry per line.
+ */
+export function caIssuersFrom(infoAccess: string | undefined): string | undefined {
+  if (infoAccess === undefined) return undefined;
+  for (const line of infoAccess.split('\n')) {
+    const m = /^CA Issuers - URI:(.+)$/.exec(line.trim());
+    if (m !== null) {
+      const url = (m[1] as string).trim();
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    }
+  }
+  return undefined;
+}
+
+/** How far up the chain to walk. Four links is more than any real certificate needs. */
+const MAX_CHAIN_FETCHES = 4;
+
+/**
+ * Everything this host's server should have sent and did not, nearest link first.
+ *
+ * One hop is enough for the six sites this was written for, and not enough in general:
+ * a leaf can be two links below the nearest root, and fetching only the first leaves the
+ * retry failing with UNABLE_TO_GET_ISSUER_CERT instead. So it follows each certificate's
+ * own AIA address upward until one of them is signed by something already in the store,
+ * which is what a browser does. A self-signed root names no issuer, so the walk ends on
+ * its own; the bound and the visited set are there for a certificate that names itself.
+ */
+async function missingChain(host: string, port: number): Promise<readonly string[]> {
+  const key = `${host}:${port}`;
+  const cached = repairedChains.get(key);
+  if (cached !== undefined) return cached;
+  const pems: string[] = [];
+  const seen = new Set<string>();
+  let url = await issuerUrl(host, port);
+  while (url !== undefined && pems.length < MAX_CHAIN_FETCHES && !seen.has(url)) {
+    seen.add(url);
+    const cert = await downloadCertificate(url);
+    if (cert === undefined) break;
+    pems.push(cert.toString());
+    url = caIssuersFrom(cert.infoAccess);
+  }
+  repairedChains.set(key, pems);
+  return pems;
+}
+
+/**
+ * A GET that can be handed extra certificates. Only used on the retry: the ordinary path
+ * stays on the platform's fetch, which is better tested and handles more of the web.
+ *
+ * `tls.setDefaultCACertificates` would be tidier, but it arrived after the oldest Node
+ * this supports, and it changes the store for the whole process rather than for one
+ * request.
+ */
+function getWithCa(
+  url: string,
+  ca: readonly string[],
+  limit: number,
+  redirectsLeft = MAX_REDIRECTS,
+): Promise<{ buffer: Buffer; type: string; final: string }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const req = httpsRequest(
+      {
+        host: target.hostname,
+        port: target.port === '' ? 443 : Number(target.port),
+        path: `${target.pathname}${target.search}`,
+        servername: target.hostname,
+        headers: {
+          'user-agent': UA,
+          accept: 'text/html,application/xhtml+xml,text/css,*/*',
+          host: target.host,
+        },
+        // Node's own roots *and* the recovered intermediate. Passing the intermediate
+        // alone replaces the store rather than adding to it, and the completed chain then
+        // has no root to reach — the repair fails in exactly the same way as the fault it
+        // is repairing, which is how this went out not working the first time.
+        ca: [...ca],
+        rejectUnauthorized: true,
+        timeout: TIMEOUT_MS,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const location = res.headers.location;
+        if (status >= 300 && status < 400 && typeof location === 'string') {
+          res.resume();
+          if (redirectsLeft === 0) {
+            reject(new Error('too many redirects'));
+            return;
+          }
+          resolve(getWithCa(new URL(location, url).href, ca, limit, redirectsLeft - 1));
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`HTTP ${status} ${res.statusMessage ?? ''}`.trimEnd()));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on('data', (c: Buffer) => {
+          size += c.length;
+          if (size > limit) {
+            req.destroy();
+            reject(
+              new Error(
+                `${Math.round(size / 1024)} KB exceeds the ${Math.round(limit / 1024)} KB limit`,
+              ),
+            );
+            return;
+          }
+          chunks.push(c);
+        });
+        res.on('end', () =>
+          resolve({ buffer: Buffer.concat(chunks), type: res.headers['content-type'] ?? '', final: url }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
+    req.end();
+  });
+}
+
+/**
+ * Retry one request with the intermediate the server left out, or rethrow.
+ *
+ * Returns undefined when the chain cannot be completed, so the caller reports the
+ * original TLS error rather than a second one about our repair attempt — that error is
+ * the one the site's administrator needs to see.
+ */
+async function retryWithCompletedChain(
   url: string,
   limit: number,
-): Promise<{ body: string; bytes: Uint8Array; final: string; type: string }> {
-  const response = await fetch(url, {
-    headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`.trimEnd());
+): Promise<{ buffer: Buffer; type: string; final: string } | undefined> {
+  const target = new URL(url);
+  const pems = await missingChain(
+    target.hostname,
+    target.port === '' ? 443 : Number(target.port),
+  );
+  if (pems.length === 0) return undefined;
+  try {
+    return await getWithCa(url, [...rootCertificates, ...pems], limit);
+  } catch {
+    return undefined;
   }
-  // Checked before reading, when the server says so, and again after: Content-Length is
-  // advisory and a chunked response has none, but when it is there it saves pulling a
-  // gigabyte into memory to then decide against it.
-  const declaredLength = Number(response.headers.get('content-length') ?? '');
+}
+
+interface Fetched {
+  body: string;
+  bytes: Uint8Array;
+  final: string;
+  type: string;
+  /** Set when the request only succeeded after the chain repair below. */
+  chainRepaired?: boolean;
+}
+
+async function get(url: string, limit: number): Promise<Fetched> {
   const tooBig = (bytes: number): Error =>
     new Error(`${Math.round(bytes / 1024)} KB exceeds the ${Math.round(limit / 1024)} KB limit`);
-  if (Number.isFinite(declaredLength) && declaredLength > limit) {
-    await response.body?.cancel();
-    throw tooBig(declaredLength);
+
+  let buffer: Uint8Array;
+  let type: string;
+  let final: string;
+  let chainRepaired = false;
+
+  try {
+    const response = await fetch(url, {
+      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`.trimEnd());
+    }
+    // Checked before reading, when the server says so, and again after: Content-Length is
+    // advisory and a chunked response has none, but when it is there it saves pulling a
+    // gigabyte into memory to then decide against it.
+    const declaredLength = Number(response.headers.get('content-length') ?? '');
+    if (Number.isFinite(declaredLength) && declaredLength > limit) {
+      await response.body?.cancel();
+      throw tooBig(declaredLength);
+    }
+    const read = await response.arrayBuffer();
+    if (read.byteLength > limit) throw tooBig(read.byteLength);
+    buffer = new Uint8Array(read);
+    type = response.headers.get('content-type') ?? '';
+    final = response.url === '' ? url : response.url;
+  } catch (err) {
+    // The server forgot its intermediate certificate. Browsers fetch it and carry on;
+    // so do we, once, and then verify the completed chain in full. Any other failure —
+    // an expired certificate, a hostname mismatch, a root nobody carries — is a real
+    // one and is rethrown untouched.
+    if (!isIncompleteChain(err)) throw err;
+    const retried = await retryWithCompletedChain(url, limit);
+    if (retried === undefined) throw err;
+    buffer = new Uint8Array(retried.buffer);
+    type = retried.type;
+    final = retried.final;
+    chainRepaired = true;
   }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > limit) throw tooBig(buffer.byteLength);
+
   // Servers still send windows-1251 in this corner of the web, and a page decoded as the
   // wrong encoding is worse than one not read at all: every rule that looks at text sees
   // mojibake and reports on it.
-  const type = response.headers.get('content-type') ?? '';
   const declared = /charset=["']?([\w-]+)/i.exec(type)?.[1];
   let body = new TextDecoder(pickEncoding(declared), { fatal: false }).decode(buffer);
   if (declared === undefined) {
-    const meta = /<meta[^>]+charset=["']?([\w-]+)/i.exec(body.slice(0, 4096))?.[1];
+    // The whole head, not a fixed window. A `<meta charset>` after </head> has no effect,
+    // so there is nothing to gain by reading further — and the fixed 4096-character
+    // window this used to be nearly lost a real page: spbu.ru declares windows-1251 at
+    // character 4063, one `<link>` tag inside the margin. The cap is a guard against a
+    // document with no head tag at all, not a limit anyone should reach.
+    const headEnd = body.search(/<\/head\s*>/i);
+    const window = body.slice(0, headEnd >= 0 ? headEnd : Math.min(body.length, 65536));
+    const meta = /<meta[^>]+charset=["']?([\w-]+)/i.exec(window)?.[1];
     if (meta !== undefined && pickEncoding(meta) !== 'utf-8') {
       body = new TextDecoder(pickEncoding(meta), { fatal: false }).decode(buffer);
     }
   }
   return {
     body,
-    bytes: new Uint8Array(buffer),
-    final: response.url === '' ? url : response.url,
+    bytes: buffer,
+    final,
     type,
+    ...(chainRepaired ? { chainRepaired: true } : {}),
   };
 }
 
@@ -176,6 +482,16 @@ export async function fetchPage(input: string): Promise<FetchedPage> {
   }
   const finalUrl = new URL(page.final);
   if (finalUrl.href !== url.href) notes.push(`redirected to ${finalUrl.href}`);
+  if (page.chainRepaired === true) {
+    // Worth saying out loud rather than silently papering over: the visitor's browser
+    // hides this, so the people running the site have no way of knowing, and the clients
+    // that do not hide it — older Android, some feed readers, anything built on a plain
+    // TLS library — simply fail to load the page.
+    notes.push(
+      'the server sent an incomplete certificate chain; the missing intermediate was ' +
+        'fetched from the address in the certificate, as a browser would',
+    );
+  }
 
   const markup = parseMarkup(page.body);
   const sheets: StylesheetSource[] = [];
