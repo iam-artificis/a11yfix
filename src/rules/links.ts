@@ -814,6 +814,60 @@ const unannouncedNewWindow: Rule = {
   },
 };
 
+/**
+ * Split an href into the part that identifies a page and the host it names, if any.
+ *
+ * `https://shm.ru/klub-druzey/` and `/klub-druzey/` are the same page written two ways,
+ * and a CMS emits both from different templates on one page all day long. Comparing the
+ * strings made four links to one destination look like four links to two, which is a
+ * finding about ambiguity where there is none.
+ *
+ * Resolving properly needs the document's own URL, which a file in a repository does not
+ * have. This does not need it: the rule only ever fires on *difference*, so where a
+ * difference cannot be proved there must be none. A relative href is treated as agreeing
+ * with any host — two links whose paths match are one destination unless both name a host
+ * and the hosts differ.
+ *
+ * `mailto:`, `tel:` and `javascript:` have no authority, so they fall through as
+ * themselves and compare exactly, which is what they should do.
+ */
+const AUTHORITY = /^(?:[a-z][a-z0-9+.-]*:)?\/\/([^/?#]*)(.*)$/i;
+
+function destination(href: string): { readonly path: string; readonly host: string } {
+  const m = AUTHORITY.exec(href.trim());
+  if (m === null) return { path: href.trim(), host: '' };
+  const rest = m[2] as string;
+  return { path: rest === '' ? '/' : rest, host: (m[1] as string).toLowerCase() };
+}
+
+/**
+ * How many destinations a set of hrefs really names, with one href to show for each.
+ *
+ * Paths agree or they do not. Where they agree, the links are one destination unless two
+ * of them name different hosts.
+ */
+function distinctDestinations(hrefs: Iterable<string>): string[] {
+  const byPath = new Map<string, Map<string, string>>();
+  for (const href of hrefs) {
+    const { path, host } = destination(href);
+    let hosts = byPath.get(path);
+    if (hosts === undefined) {
+      hosts = new Map();
+      byPath.set(path, hosts);
+    }
+    if (!hosts.has(host)) hosts.set(host, href);
+  }
+  const out: string[] = [];
+  for (const hosts of byPath.values()) {
+    const named = [...hosts].filter(([host]) => host !== '');
+    // A relative href agrees with whatever host the page is served from, so it is only
+    // its own destination when no absolute href shares its path.
+    if (named.length === 0) out.push(hosts.get('') as string);
+    else for (const [, href] of named) out.push(href);
+  }
+  return out;
+}
+
 const ambiguousLinkNames: Rule = {
   id: 'A11Y-LINK-006',
   title: 'Identical link text, different destinations',
@@ -854,9 +908,10 @@ const ambiguousLinkNames: Rule = {
 
     const out: Violation[] = [];
     for (const group of groups.values()) {
-      if (group.hrefs.size < 2) continue;
-      const shown = [...group.hrefs].slice(0, 3).map((h) => truncate(h, 32)).join(', ');
-      const extra = group.hrefs.size > 3 ? ', …' : '';
+      const destinations = distinctDestinations(group.hrefs);
+      if (destinations.length < 2) continue;
+      const shown = destinations.slice(0, 3).map((h) => truncate(h, 32)).join(', ');
+      const extra = destinations.length > 3 ? ', …' : '';
       for (const el of group.els) {
         const span = elementSpan(el);
         out.push(
@@ -867,7 +922,7 @@ const ambiguousLinkNames: Rule = {
             severity: ambiguousLinkNames.severity,
             start: span.start,
             end: span.end,
-            message: `${group.els.length} links in this file are named "${truncate(group.display, 40)}" but point to ${group.hrefs.size} different destinations (${shown}${extra}).`,
+            message: `${group.els.length} links in this file are named "${truncate(group.display, 40)}" but point to ${destinations.length} different destinations (${shown}${extra}).`,
             impact:
               'The screen reader\'s list of links shows these as the same entry repeated. A user who picks one has no way to tell which destination they chose, and no way to return to the other.',
             fix: {

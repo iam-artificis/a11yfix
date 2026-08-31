@@ -193,33 +193,39 @@ near-clean result.
 
 | Site | Errors | Warnings | Info | Overlay | Total |
 |---|---|---|---|---|---|
-| `shm.ru` | 118 | 2 | 204 | 4 | 324 |
-| `spbu.ru` | 176 | 2 | 75 | 2 | 253 |
-| `obrnadzor.gov.ru` | 75 | 12 | 109 | — | 196 |
+| `shm.ru` | 118 | 2 | 200 | 4 | 320 |
+| `spbu.ru` | 176 | 2 | 49 | 2 | 227 |
 | `rsl.ru` | 105 | 5 | 80 | — | 190 |
+| `obrnadzor.gov.ru` | 75 | 12 | 97 | — | 184 |
 | `nlr.ru` | 18 | 5 | 82 | 2 | 105 |
 | `tretyakovgallery.ru` | 27 | 1 | 68 | — | 96 |
 | `rusmuseum.ru` | 8 | 5 | 27 | — | 40 |
 | `libnn.ru` | 16 | 7 | 11 | — | 34 |
 | `msu.ru` (app shell) | 1 | 1 | 0 | — | 2 |
 
-Read the 1240 total with the same suspicion the cal.com row deserves. 243 findings are
+Read the 1198 total with the same suspicion the cal.com row deserves. 243 findings are
 `target="_blank"` without `rel="noopener"` and 230 are a new window opened without
 warning — conventions, and on this evidence near-universal ones. Both are reported as
-information rather than as faults, for exactly that reason. Strip them and 767 remain, of
-which the load-bearing part is:
+information rather than as faults, for exactly that reason. Strip them and 725 remain, of
+which the part that actually blocks somebody is:
 
 - **238 pieces of text** below the contrast their size requires;
-- **132 pairs of links** sharing one name and going to different places;
 - **134 links** with no discernible text — an icon, or an image with no `alt`, and nothing else;
 - **65 images** with no `alt` at all (50) or an `alt` that is a file name or a placeholder (15);
-- **36 elements** carrying `role="img"` with no accessible name.
+- **36 elements** carrying `role="img"` with no accessible name;
+- **21 buttons** with no accessible name, and 21 anchors that are buttons wearing a link's
+  clothes.
 
-### The measurement corrected itself, downward
+A further 90 are links sharing a name and going to different places, which is a real
+problem for anyone listening to a list of links and is reported as information, because
+whether it is worth fixing depends on the page.
 
-An earlier run of this table read 1345, and the difference is not the sites changing. The
-placeholder-alt rule tested for "contains no letters" with `[^A-Za-z]`, which is a claim
-that only the Latin alphabet contains words. `alt="Логотип Государственного
+### The measurement corrected itself, downward, twice
+
+An earlier run of this table read 1345, and the difference is not the sites changing.
+
+The placeholder-alt rule tested for "contains no letters" with `[^A-Za-z]`, which is a
+claim that only the Latin alphabet contains words. `alt="Логотип Государственного
 исторического музея"` has no A-Z in it. So did every other careful Russian description on
 these nine sites, and the tool called all of them empty: 122 findings, of which 107 were
 invented. Greek, Hebrew, Arabic, Japanese and Chinese alt text would have fared the same.
@@ -231,7 +237,16 @@ read as a confident, specific accusation with a line number next to it. Nothing 
 tests or five Western repositories could have caught it, because none of them contains a
 word that is not Latin.
 
-The nine sites did, immediately, and only because the corpus resembles the client.
+The second correction came from reading the output rather than the code. The
+identical-link-text rule compared href *strings*, so `https://shm.ru/klub-druzey/` in the
+header template and `/klub-druzey/` in the menu were two destinations — four links to one
+page, reported as ambiguous. A CMS emits both from one page all day long. Destinations are
+now compared by path, with a relative href taken to agree with any host, because the rule
+fires on difference and a difference that cannot be proved is not one. 132 findings across
+the nine sites became 90.
+
+Both were found the same way: by looking at what the tool said about a real site in the
+segment it is sold into, one finding at a time. Neither was reachable from a unit test.
 
 ### The finding the whole rule set is built around
 

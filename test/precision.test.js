@@ -623,3 +623,61 @@ test('a Russian new-window warning in the link name suppresses the new-window fi
     'the link already says what it does; saying it again is not an improvement',
   );
 });
+
+
+/**
+ * The same page written two ways is one destination.
+ *
+ * A CMS emits `https://shm.ru/klub-druzey/` from the header template and
+ * `/klub-druzey/` from the menu, on the same page. Comparing href strings made four
+ * links to one place look like four links to two, and reported ambiguity where there was
+ * none. Resolving properly needs the document's own URL, which a file in a repository does
+ * not have — but this rule only fires on *difference*, so where difference cannot be
+ * proved there must be none.
+ */
+
+const ambiguous = (body) =>
+  run(
+    'page.html',
+    `<!doctype html><html lang="en"><head><title>t</title></head><body><main><h1>H</h1>${body}</main></body></html>`,
+  ).violations.filter((v) => v.ruleId === 'A11Y-LINK-006');
+
+test('an absolute and a root-relative href to the same path are one destination', () => {
+  assert.deepEqual(
+    ambiguous('<a href="https://shm.ru/club/">Friends</a><a href="/club/">Friends</a>'),
+    [],
+  );
+  // Scheme and case of the host do not make a second destination either.
+  assert.deepEqual(
+    ambiguous('<a href="http://SHM.ru/club/">Friends</a><a href="https://shm.ru/club/">Friends</a>'),
+    [],
+  );
+  // Nor does a protocol-relative href.
+  assert.deepEqual(
+    ambiguous('<a href="//shm.ru/club/">Friends</a><a href="/club/">Friends</a>'),
+    [],
+  );
+});
+
+test('two hosts at the same path are still two destinations', () => {
+  const found = ambiguous('<a href="https://a.example/x">Docs</a><a href="https://b.example/x">Docs</a>');
+  assert.equal(found.length, 2);
+  assert.match(found[0].message, /2 different destinations/);
+});
+
+test('different paths are still different, and the count is of destinations', () => {
+  // Three links, three hrefs, two places: the message must say two.
+  const found = ambiguous(
+    '<a href="https://shm.ru/tickets/">Билеты</a><a href="/tickets/">Билеты</a>' +
+      '<a href="https://tickets.shm.ru/?id=1">Билеты</a>',
+  );
+  assert.equal(found.length, 3);
+  assert.match(found[0].message, /3 links in this file are named "Билеты" but point to 2 different/);
+});
+
+test('a scheme with no authority compares as itself', () => {
+  // mailto: and tel: have no host to strip; two different addresses are two destinations.
+  const found = ambiguous('<a href="mailto:a@x.ru">Почта</a><a href="mailto:b@x.ru">Почта</a>');
+  assert.equal(found.length, 2);
+  assert.deepEqual(ambiguous('<a href="mailto:a@x.ru">Почта</a><a href="mailto:a@x.ru">Почта</a>'), []);
+});
