@@ -461,3 +461,23 @@ test('no rule judges the placeholder a patch wrote as if a person had written it
   }
   assert.ok(after.some((v) => v.ruleId === 'A11Y-TODO-001'), 'the markers are still reported');
 });
+
+test('a file the analyser cannot read is a finding about that file, not the end of the run', () => {
+  // Parsing and colour resolution used to sit above the guard that protects rule
+  // execution, so a throw there ended the whole run. `background: constructor` did it:
+  // the process exited 2 and every other file in the repository went unscanned, with no
+  // output at all. Both halves are asserted here — that this input no longer throws, and
+  // that if something ever does, one file is what is lost.
+  const poisoned = [
+    '<!doctype html><html lang="en"><head><title>t</title>',
+    '<style>.a { background: constructor; } .b { background: __proto__; }</style>',
+    '</head><body><main><p class="a">x</p><p class="b">y</p></main></body></html>',
+  ].join('');
+  const result = run('poisoned.html', poisoned);
+  assert.ok(Array.isArray(result.violations));
+  assert.equal(
+    result.violations.some((v) => v.ruleId === 'A11Y-META-001'),
+    false,
+    'a prototype key in a stylesheet is ordinary unsupported input, not a failure',
+  );
+});

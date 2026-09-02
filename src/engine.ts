@@ -12,6 +12,7 @@ import type {
   Violation,
 } from './types.js';
 import { parseMarkup, positionAt } from './parse/markup.js';
+import type { ParsedMarkup } from './parse/markup.js';
 import { Palette } from './design/palette.js';
 import type { StylesheetSource } from './design/palette.js';
 import { applyEdits, selectEdits } from './fix/apply.js';
@@ -120,13 +121,46 @@ export function analyseSource(
   options: AnalyseOptions,
 ): FileResult {
   const kind = kindOf(file) ?? 'html';
-  // Template literals only exist in the JavaScript-family formats; in a .html file a
-  // backtick is ordinary text and masking on it would hide half the document.
-  const markup = parseMarkup(source, { skipTemplateLiterals: kind !== 'html' && kind !== 'css' });
-  // Only the stylesheets that can actually reach this file. See design/scope.ts for why
-  // "all of them" is not a safe default on anything larger than a single app.
-  const sheets = selectStylesheets(file, source, options.stylesheets ?? []);
-  const palette = new Palette(markup, file, sheets);
+
+  // Parsing and colour resolution used to sit above the guard that protects rule
+  // execution below, and a throw here therefore ended the whole run rather than one file.
+  // It did: `background: constructor` reached a table lookup that answered with the Object
+  // function, the process exited 2, and every other file in the repository went unscanned
+  // with no output at all. A file this tool cannot read is a finding about that file.
+  let markup: ParsedMarkup;
+  let palette: Palette;
+  try {
+    // Template literals only exist in the JavaScript-family formats; in a .html file a
+    // backtick is ordinary text and masking on it would hide half the document.
+    markup = parseMarkup(source, { skipTemplateLiterals: kind !== 'html' && kind !== 'css' });
+    // Only the stylesheets that can actually reach this file. See design/scope.ts for why
+    // "all of them" is not a safe default on anything larger than a single app.
+    const sheets = selectStylesheets(file, source, options.stylesheets ?? []);
+    palette = new Palette(markup, file, sheets);
+  } catch (err) {
+    return {
+      file,
+      kind,
+      violations: [
+        {
+          ruleId: 'A11Y-META-001',
+          wcag: [],
+          level: 'A',
+          severity: 'warning',
+          file,
+          start: 0,
+          end: 0,
+          line: 1,
+          column: 1,
+          message: `This file could not be parsed: ${err instanceof Error ? err.message : String(err)}`,
+          impact: 'This file was not analysed at all. Treat the result as incomplete, not clean.',
+          excerpt: '',
+        },
+      ],
+      appliedFixes: 0,
+      skippedFixes: 0,
+    };
+  }
 
   const violations: Violation[] = [];
   const ctx: RuleContext = {

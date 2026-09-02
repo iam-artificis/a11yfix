@@ -38,8 +38,16 @@ export interface OKLCH {
  * list often enough that a partial table silently skips real contrast failures — the
  * scanner would report "unsupported colour" and move on, which is the one failure
  * mode a checking tool must not have.
+ *
+ * Built on a null prototype rather than an object literal. The table is indexed by
+ * whatever a stylesheet happens to contain, and on a literal `color: constructor`
+ * returns the Object function and `color: __proto__` returns Object.prototype — both
+ * pass an `!== undefined` check and then reach `input.trim()` on something that is not
+ * a string. One line of nonsense CSS anywhere in a repository ended the entire scan,
+ * because that throw happened while the Palette was being built rather than inside a
+ * rule. Fixing it on the table fixes it for every future reader of the table too.
  */
-const CSS_NAMED_COLORS: Readonly<Record<string, string>> = {
+const CSS_NAMED_COLORS: Readonly<Record<string, string>> = Object.assign(Object.create(null), {
   aliceblue: '#f0f8ff', antiquewhite: '#faebd7', aqua: '#00ffff', aquamarine: '#7fffd4',
   azure: '#f0ffff', beige: '#f5f5dc', bisque: '#ffe4c4', black: '#000000',
   blanchedalmond: '#ffebcd', blue: '#0000ff', blueviolet: '#8a2be2', brown: '#a52a2a',
@@ -80,7 +88,7 @@ const CSS_NAMED_COLORS: Readonly<Record<string, string>> = {
   tomato: '#ff6347', turquoise: '#40e0d0', violet: '#ee82ee', wheat: '#f5deb3',
   white: '#ffffff', whitesmoke: '#f5f5f5', yellow: '#ffff00', yellowgreen: '#9acd32',
   transparent: '#00000000',
-};
+});
 
 /** Parse the colour syntaxes that actually appear in stylesheets. Returns null if unsupported. */
 export function parseColor(input: string): RGB | null {

@@ -141,3 +141,18 @@ test('repair output always lies inside the sRGB gamut', () => {
     }
   }
 });
+
+test('a colour named after a member of Object.prototype is not a colour', () => {
+  // The named-colour table is indexed by whatever a stylesheet contains. On an ordinary
+  // object literal `constructor` answers with the Object function and `__proto__` with
+  // Object.prototype, both of which pass an `!== undefined` check and then reach
+  // `.trim()` on something that is not a string. The table is built with a null
+  // prototype so the question cannot arise, and these are the two names that asked it.
+  for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf']) {
+    assert.equal(parseColor(name), null, name + ' must not resolve to a colour');
+    assert.equal(parseColor(name.toUpperCase()), null);
+    assert.equal(parseColor('  ' + name + '  '), null);
+  }
+  // The real names still work, which is the point of keeping a table at all.
+  assert.deepEqual(parseColor('white'), { r: 255, g: 255, b: 255, a: 1 });
+});
