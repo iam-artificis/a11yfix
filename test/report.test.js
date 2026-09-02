@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { analyseSource } from '../dist/engine.js';
 import { ALL_RULES } from '../dist/rules/index.js';
 import { renderReport, escapeHtml } from '../dist/report.js';
@@ -476,4 +477,41 @@ test('a finding only a person can settle keeps its single block', () => {
   // And the pair does appear elsewhere in the same report, so this is a property of the
   // finding rather than of the rendering being off.
   assert.ok(html.includes('<pre class="now">'));
+});
+
+/**
+ * Colour is a property of the destination, not of whether the destination is a pipe.
+ *
+ * Suppressing it when stdout is not a TTY is right by default — an escape sequence in a
+ * CI log that does not render is noise in the middle of a finding. But a CI log viewer
+ * that does render, `less -R`, and the script that generates the README image all read a
+ * pipe, so there has to be a way to say so. NO_COLOR stays the one that wins, because it
+ * is the one a person sets deliberately.
+ */
+const runCli = (env) => {
+  try {
+    return execFileSync(process.execPath, ['dist/cli.js', 'demo/Card.tsx', '--quiet'], {
+      encoding: 'utf8',
+      env: { ...process.env, NO_COLOR: undefined, FORCE_COLOR: undefined, ...env },
+    });
+  } catch (err) {
+    // Findings remain on the fixture, so the CLI exits 1. That is the expected result.
+    return err.stdout ?? '';
+  }
+};
+
+const ESC = String.fromCharCode(27);
+
+test('a piped run carries no escape sequences, and FORCE_COLOR overrides that', () => {
+  const plain = runCli({});
+  assert.ok(plain.includes('A11Y-COLOR-001') || plain.includes('contrast'), 'the run produced no findings');
+  assert.equal(plain.includes(ESC), false, 'a piped run should print no colour');
+
+  const coloured = runCli({ FORCE_COLOR: '1' });
+  assert.ok(coloured.includes(ESC), 'FORCE_COLOR should turn colour back on');
+});
+
+test('NO_COLOR wins over FORCE_COLOR', () => {
+  const out = runCli({ FORCE_COLOR: '1', NO_COLOR: '1' });
+  assert.equal(out.includes(ESC), false, 'NO_COLOR is the one a person sets on purpose');
 });

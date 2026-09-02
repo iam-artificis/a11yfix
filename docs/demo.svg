@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="315" viewBox="0 0 800 315" font-family='ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' font-size="13">
+<rect width="800" height="315" rx="8" fill="#0d1117"/>
+<rect width="800" height="30" rx="8" fill="#161b22"/>
+<rect y="22" width="800" height="8" fill="#161b22"/>
+<circle cx="18" cy="15" r="5" fill="#ff5f57"/><circle cx="36" cy="15" r="5" fill="#febc2e"/><circle cx="54" cy="15" r="5" fill="#28c840"/>
+<text x="18" y="44" fill="#7ee787">$</text><text x="33.6" y="44" fill="#c9d1d9">npx a11yfix demo/Card.tsx</text>
+<text x="18.0" y="69" fill="#c9d1d9" font-weight="600">demo/Card.tsx</text>
+<text x="33.6" y="88" fill="#6e7681">4:7</text><text x="72.6" y="88" fill="#ff7b72">error  </text><text x="127.2" y="88" fill="#c9d1d9">  Text contrast is 2.54:1, below the required 3:1 (#9ca3af on #ffffff).</text><text x="681.0" y="88" fill="#6e7681"> WCAG 1.4.3</text>
+<text x="33.6" y="107" fill="#6e7681">5:7</text><text x="72.6" y="107" fill="#ff7b72">error  </text><text x="127.2" y="107" fill="#c9d1d9">  Text contrast is 2.54:1, below the required 4.5:1 (#9ca3af on #ffffff).</text><text x="696.6" y="107" fill="#6e7681"> WCAG 1.4.3</text>
+<text x="33.6" y="126" fill="#6e7681">6:7</text><text x="72.6" y="126" fill="#ff7b72">error  </text><text x="127.2" y="126" fill="#c9d1d9">  Text contrast is 2.54:1, below the required 4.5:1 (#10b981 on #ffffff).</text><text x="696.6" y="126" fill="#6e7681"> WCAG 1.4.3</text>
+
+<text x="18.0" y="164" fill="#c9d1d9" font-weight="600">3 findings</text><text x="96.0" y="164" fill="#c9d1d9">  (</text><text x="119.4" y="164" fill="#ff7b72">3 errors</text><text x="181.8" y="164" fill="#c9d1d9">, </text><text x="197.4" y="164" fill="#e3b341">0 warnings</text><text x="275.4" y="164" fill="#c9d1d9">)  across 1 file</text>
+<text x="18.0" y="183" fill="#6e7681">0 fixable automatically, 3 fixable with review, 0 need a person.</text>
+<text x="18.0" y="202" fill="#6e7681">Run with --fix to apply, or --diff to preview.</text>
+
+<text x="18.0" y="240" fill="#c9d1d9">Automated checks cover a minority of WCAG success criteria. A clean run is not a</text>
+<text x="18.0" y="259" fill="#c9d1d9">conformance claim: keyboard flows, focus order, meaningful alt text and screen-reader</text>
+<text x="18.0" y="278" fill="#c9d1d9">behaviour still need a human. See docs/coverage.md.</text>
+</svg>

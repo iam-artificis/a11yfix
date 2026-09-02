@@ -54,7 +54,7 @@
     "test": "npm run build && node scripts/check-chars.mjs && node scripts/test.mjs",
     "check-chars": "node scripts/check-chars.mjs",
     "prepublishOnly": "npm run build",
-    "docs": "npm run build && node scripts/gen-coverage.mjs"
+    "docs": "npm run build && node scripts/gen-coverage.mjs && node scripts/gen-demo-svg.mjs"
   },
   "dependencies": {},
   "devDependencies": {

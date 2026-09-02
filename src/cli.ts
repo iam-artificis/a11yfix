@@ -267,8 +267,17 @@ const C = {
   green: ESC + '[32m', grey: ESC + '[90m',
 };
 
-/** Colour is suppressed when output is piped, so reports stay readable in CI logs. */
-const useColor = process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined;
+/**
+ * Colour is suppressed when output is piped, so reports stay readable in CI logs.
+ *
+ * FORCE_COLOR overrides that, because "piped" and "nothing will render this" are not the
+ * same thing: a CI log viewer, `less -R` and the script that generates the demo image in
+ * the README all read a pipe and all show colour. NO_COLOR still wins over both — it is
+ * the one a user sets on purpose.
+ */
+const useColor =
+  process.env['NO_COLOR'] === undefined &&
+  (process.env['FORCE_COLOR'] !== undefined || process.stdout.isTTY === true);
 const c = (code: string, s: string): string => (useColor ? code + s + C.reset : s);
 
 /** "1 file", "2 files" — sloppy plurals in a precision tool read as carelessness. */

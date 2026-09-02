@@ -43,6 +43,11 @@ jobs:
       - name: Fail if docs/coverage.md is stale
         run: git diff --exit-code docs/coverage.md
 
+      # Same argument for the image at the top of the README: it is a picture of what the
+      # command prints, so a stale one is a screenshot of a version that no longer exists.
+      - name: Fail if the README image is stale
+        run: node scripts/gen-demo-svg.mjs --check
+
   dogfood:
     runs-on: ubuntu-latest
     steps:
