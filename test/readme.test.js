@@ -166,3 +166,23 @@ test("the README account of which rules carry a WCAG criterion is the rule set",
     ['A11Y-TODO-001'],
   );
 });
+
+test('the README sample shows the corrected line the CLI prints', () => {
+  // The block understated the tool for several commits: the CLI prints the line as it
+  // would read after the patch, directly under the line as it reads now, and the README
+  // showed only the first of the two. Anything the sample quotes has to be quotable from
+  // a real run, so both lines are asserted against what the analyser produces.
+  const run = analyseSource(join(root, 'demo/Card.tsx'), readFileSync(join(root, 'demo/Card.tsx'), 'utf8'), {
+    rules: ALL_RULES,
+    level: 'AA',
+    fixThreshold: null,
+  });
+  const first = run.violations.find((v) => v.ruleId === 'A11Y-COLOR-001');
+  assert.ok(first !== undefined, 'the fixture stopped producing a contrast finding');
+  assert.ok(first.excerpt !== undefined && first.excerptFixed !== undefined, 'no corrected line');
+  assert.ok(README.includes(first.excerpt.trim()), 'README omits the line as it reads now');
+  assert.ok(
+    README.includes(first.excerptFixed.trim()),
+    'README omits the corrected line the CLI prints under it',
+  );
+});

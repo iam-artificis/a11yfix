@@ -111,6 +111,7 @@ demo/Card.tsx
           People with low vision, colour vision deficiency, or anyone reading on a phone
           in sunlight cannot reliably make out this text.
           <h2 className="text-gray-400 text-2xl font-bold">
+          <h2 className="text-gray-500 text-2xl font-bold">
           fixable (review): Replace text-gray-400 with text-gray-500, reaching 4.83:1.
           A11Y-COLOR-001
 
@@ -119,8 +120,13 @@ demo/Card.tsx
 Run with --fix to apply, or --diff to preview.
 ```
 
-That "reaching 4.83:1" is recomputed from the shade the patch actually writes, not from
-the ideal colour the solver aimed at. It is a number you can check.
+Two of the three findings are cut from that block and the impact sentence is wrapped to
+the width of this page; everything else is what the command prints.
+
+The second `<h2>` line is the finding's own answer, not a description of it — the line as
+it would read after the patch, so the change can be checked by looking rather than by
+applying. And that "reaching 4.83:1" is recomputed from the shade the patch actually
+writes, not from the ideal colour the solver aimed at. It is a number you can check.
 
 ## What it will never do
 
