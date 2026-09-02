@@ -4,9 +4,11 @@
 
 First release.
 
-- 69 rules across contrast, images and media, forms, document structure, keyboard
-  operability, ARIA, and links, each anchored to the WCAG 2.2 success criterion it
-  implements. `docs/coverage.md` is generated from the rule set, so it cannot overstate
+- 70 rules across contrast, images and media, forms, document structure, keyboard
+  operability, ARIA, and links. 59 name the WCAG 2.2 success criterion they implement;
+  the other 11 are practice WCAG has no criterion for, reported as warnings or
+  information — except `A11Y-TODO-001`, which reports this tool's own unfinished fix and
+  is an error on purpose. `docs/coverage.md` is generated from the rule set, so it cannot overstate
   what is covered.
 - Contrast repair in OKLCH: hue held fixed, lightness moved by the minimum needed, chroma
   reduced only when the result would leave sRGB. Moves whichever side of the pair costs
@@ -86,7 +88,7 @@ are byte-identical; `shadcn-ui/ui` went from 1.58s to 1.32s and `calcom/cal.com`
 The audit report can be produced in Russian: `--report audit.html --lang ru`. Only the
 report is translated — the terminal is read by whoever ran the command, the report by
 whoever commissioned the work, and in the market where ГОСТ Р 52872-2019 gets written
-into a procurement contract that second person may not read English at all. All 69 rules
+into a procurement contract that second person may not read English at all. All 70 rules
 have Russian text and a test fails the build if one is added without it; a second test
 fails if any line the report writes about itself is left in English. Where a patch is
 offered, the change itself — `text-gray-400 → text-gray-600` — appears in both languages,

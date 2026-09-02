@@ -139,3 +139,30 @@ test('the README table and the field report agree', () => {
     );
   }
 });
+
+test("the README account of which rules carry a WCAG criterion is the rule set", () => {
+  // The README used to say every rule was anchored to a criterion "with one exception".
+  // Eleven carry none. That is not a defect in the rules — a page with no <main> is
+  // advice WCAG has no success criterion for — but claiming otherwise in the sentence
+  // that introduces them is the kind of overstatement this tool exists to argue against.
+  const unanchored = ALL_RULES.filter((r) => r.wcag.length === 0);
+  const anchored = ALL_RULES.length - unanchored.length;
+  const nonError = unanchored.filter((r) => r.severity !== 'error').length;
+  assert.ok(
+    README.includes(anchored + ' of them name the WCAG success criterion'),
+    'README does not say ' + anchored + ' rules name a criterion',
+  );
+  assert.ok(
+    README.includes('The other ' + unanchored.length + ' are things every'),
+    'README does not say ' + unanchored.length + ' rules name none',
+  );
+  assert.ok(
+    README.includes('and ' + nonError + ' of them are reported as warnings or'),
+    'README does not say ' + nonError + ' of those are not errors',
+  );
+  // The one that is an error is named in the README, so name it here too.
+  assert.deepEqual(
+    unanchored.filter((r) => r.severity === 'error').map((r) => r.id),
+    ['A11Y-TODO-001'],
+  );
+});

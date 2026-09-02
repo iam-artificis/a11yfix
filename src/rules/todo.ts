@@ -29,7 +29,7 @@ const todoMarkerLeft: Rule = {
   level: 'A',
   severity: 'error',
   summary:
-    'A fix left a A11YFIX-TODO placeholder for a human to complete, and it is still there.',
+    'A fix left an A11YFIX-TODO placeholder for a human to complete, and it is still there.',
   appliesTo: ['html', 'jsx', 'vue', 'svelte'],
   run(ctx): Violation[] {
     const out: Violation[] = [];

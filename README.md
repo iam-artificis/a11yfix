@@ -1,5 +1,11 @@
 # A11yFix
 
+[![CI](https://github.com/iam-artificis/a11yfix/actions/workflows/ci.yml/badge.svg)](https://github.com/iam-artificis/a11yfix/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/a11yfix.svg)](https://www.npmjs.com/package/a11yfix)
+[![node](https://img.shields.io/node/v/a11yfix.svg)](https://nodejs.org)
+[![licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+[![dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)](package.json)
+
 **Accessibility tools tell you what is broken. This one writes the patch.**
 
 ```
@@ -24,6 +30,13 @@ npx a11yfix src --diff
    );
 ```
 
+```bash
+npm install -D a11yfix        # or run it with no install at all: npx a11yfix .
+```
+
+Node 20 or newer. Zero runtime dependencies, by design — a tool you point at your source
+should not bring a dependency tree with it.
+
 ---
 
 ## Why this exists
@@ -34,6 +47,12 @@ which component produced that node, finds the file, finds the colour, decides wh
 change it to, and checks the change did not break the design.
 
 That translation step is most of the work, and no tool does it.
+
+If the question you are actually asking is "why not just run axe", that is the right
+question and it has its own page:
+[**Where A11yFix sits among the tools you already have**](docs/comparison.md). Short
+answer: it does not replace any of them. Run axe. Add this when you want the findings
+turned into a patch.
 
 A11yFix reads your **source**, keeps byte-exact offsets for every tag and attribute, and
 emits a patch. It scans 3,300 files in 1.3 seconds, needs no browser, no
@@ -58,16 +77,22 @@ ratio that step really reaches. It composites `bg-black/10` against what is behi
 resolves CSS custom properties and Tailwind v4 `@theme` tokens, and stops at a gradient
 or a background image instead of pretending the colour underneath is what you see.
 
-Beyond contrast, 70 rules cover images and media alternatives, form labelling, document
-structure, keyboard operability, ARIA correctness, and link semantics — each anchored to
-the WCAG success criterion it implements.
+Contrast is three of the 70 rules. The rest cover images and media alternatives, form
+labelling, document structure, keyboard operability, ARIA correctness, and link semantics.
+59 of them name the WCAG success criterion they implement. The other 11 are things every
+practitioner will tell you to do that WCAG has no criterion for — a page with no `<main>`,
+an `accesskey`, a data table with no caption — and 10 of them are reported as warnings or
+information rather than as errors. The eleventh, `A11Y-TODO-001`, is not about the page:
+it reports a placeholder this tool itself wrote, and it is an error precisely so that an
+unfinished fix cannot pass as a finished one. [docs/coverage.md](docs/coverage.md) says
+which rule is which.
 
-One of them is anchored to no criterion at all. A11Y-DOC-016 reports an accessibility
+One of those 11 is different in kind from the rest. A11Y-DOC-016 reports an accessibility
 overlay — accessiBe, UserWay, AudioEye, or the `bvi.js` «версия для слабовидящих» switch
 that is the usual answer to ГОСТ Р 52872-2019 — and says, as `info` and without asking
 you to remove anything, what it does not change: an image with no `alt` has no `alt` at
 any font size. On nine live Russian institutional sites, three carried a switch and all
-three had images with no alternative text behind it — 79 of them. See [the field
+three had images with no alternative text behind it. See [the field
 report](docs/field-report.md#a-second-measurement-nine-russian-institutional-sites).
 
 ## What a run looks like
@@ -140,25 +165,6 @@ npx a11yfix . --report                 # standalone HTML audit report
 
 Exit code is `1` when any error-severity finding remains, so it works as a CI gate.
 
-## A report for people who will not run a CLI
-
-```bash
-npx a11yfix . --report              # writes a11yfix-report.html
-```
-
-One self-contained HTML file — no scripts, no fonts, no images, nothing to fetch — that
-opens offline, prints, and survives being emailed. It groups findings by rule, names the
-file and line for every one of them, quotes the source that triggered it, and links each
-rule to the W3C's own page for the criterion it belongs to.
-
-By default it lists the first twelve occurrences of each rule and says how many it left
-out. `--report --all` lists every one, which is what you want when the file is going to
-somebody as a deliverable rather than being skimmed.
-
-It states what the tool cannot check *before* the findings rather than after. A report
-that lets a passing automated scan imply conformance is the thing the FTC fined an
-overlay vendor for, and burying the caveat at the bottom is how that happens.
-
 ## Adopting on a project that already has findings
 
 The first run on an existing application is not going to be zero. A real one produced
@@ -191,6 +197,16 @@ findings rather than after.
 npx a11yfix . --report                 # a11yfix-report.html
 npx a11yfix . --report audit.html --lang ru
 ```
+
+It groups findings by rule, names the file and line for every one, quotes the source that
+triggered it, and links each rule to the W3C's own page for the criterion it belongs to.
+By default it lists the first twelve occurrences of each rule and says how many it left
+out; `--report --all` lists every one, which is what you want when the file is going to
+somebody as a deliverable rather than being skimmed.
+
+It states what the tool cannot check *before* the findings rather than after. A report
+that lets a passing automated scan imply conformance is the thing the FTC fined an overlay
+vendor for in 2025, and burying the caveat at the bottom is how that happens.
 
 Where the change is one a11yfix would write, the report shows it as two lines rather
 than describing it:
@@ -314,11 +330,15 @@ usually contain HTML only inside string literals, and reporting on those is nois
 ## GitHub Action
 
 ```yaml
-- uses: iam-artificis/a11yfix@v1
+- uses: iam-artificis/a11yfix@v1     # or @v0.1.0 to pin exactly
   with:
     path: src
     mode: comment   # or: fail | pr
 ```
+
+`v1` tracks the action's inputs, not the package version: it moves when `path`, `mode`,
+`level` or `token` change, which is not on every release. Pin `@v0.1.0` if you would
+rather nothing move at all, and set the `version` input to pin the npm package with it.
 
 `comment` posts the findings on the pull request and updates the same comment on every
 push, `fail` gates the build, `pr` opens a follow-up pull request containing the fixes.
@@ -360,15 +380,6 @@ green, a stylesheet in one package colouring pages in another, `<Html>` from an 
 library treated as the document root, markup inside a `dedent` block treated as a page.
 Each is now a regression test. The full write-up, with pinned commits and the cases where
 the tool is still wrong, is in [docs/field-report.md](docs/field-report.md).
-
-## Install
-
-```bash
-npm install -D a11yfix
-```
-
-Zero runtime dependencies, by design. A tool you point at your source should not bring a
-dependency tree with it.
 
 ## Licence
 
