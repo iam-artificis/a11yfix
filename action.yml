@@ -58,10 +58,16 @@ runs:
   steps:
     - name: Check inputs
       shell: bash
+      # Read through the environment rather than interpolated into the script. A ${{ }}
+      # expression is substituted as text before bash parses the line, so a value with a
+      # quote in it becomes syntax — and the whitelist two lines below would be checking
+      # a string that had already run.
+      env:
+        MODE: ${{ inputs.mode }}
       run: |
-        case "${{ inputs.mode }}" in
+        case "$MODE" in
           comment|fail|pr) ;;
-          *) echo "::error::mode must be one of: comment, fail, pr (got '${{ inputs.mode }}')"; exit 1 ;;
+          *) echo "::error::mode must be one of: comment, fail, pr (got '$MODE')"; exit 1 ;;
         esac
 
     - name: Analyse
@@ -97,8 +103,11 @@ runs:
     - name: Gate the build
       if: inputs.mode == 'fail'
       shell: bash
+      # Same reason as "Check inputs": no ${{ }} inside a run: body.
+      env:
+        ERRORS: ${{ steps.run.outputs.errors }}
       run: |
-        errors="${{ steps.run.outputs.errors }}"
+        errors="$ERRORS"
         if [ "${errors:-0}" -gt 0 ]; then
           echo "::error::${errors} error-severity accessibility findings remain."
           exit 1

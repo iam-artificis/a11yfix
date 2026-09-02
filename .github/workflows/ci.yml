@@ -1,5 +1,11 @@
 name: CI
 
+# Nothing here writes back to GitHub: the three jobs read the checkout and run node.
+# Stated rather than inherited, so the token this workflow gets does not depend on an
+# account-wide default that can be changed elsewhere.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -64,8 +70,16 @@ jobs:
             for (const tag of [/<script/i, /<link\b/i, /<img\b/i]) {
               if (tag.test(html)) { console.error('report fetches something:', tag); process.exit(1); }
             }
-            for (const url of html.match(/https?:\/\/[^\"'\s<)]+/g) ?? []) {
-              if (!url.startsWith('https://www.w3.org/')) {
+            // Only what the browser would actually fetch or navigate to counts: attribute
+            // values and CSS url(). The report quotes source, and quoted source may itself
+            // contain a URL as escaped text inside <pre> — scanning the raw bytes reports
+            // the fixture's own <iframe src> as a reference the report fetches, which it is
+            // not, and the check then fails on the tool working correctly.
+            const attrRefs = [...html.matchAll(/(?:href|src|srcset|action|formaction|poster|background)\s*=\s*\"([^\"]*)\"/gi)].map(m => m[1]);
+            const cssRefs = [...html.matchAll(/url\(\s*[\"']?([^)\"']+)/gi)].map(m => m[1]);
+            if (/@import/i.test(html)) { console.error('report imports a stylesheet'); process.exit(1); }
+            for (const url of [...attrRefs, ...cssRefs]) {
+              if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('https://www.w3.org/')) {
                 console.error('unexpected external reference:', url); process.exit(1);
               }
             }
