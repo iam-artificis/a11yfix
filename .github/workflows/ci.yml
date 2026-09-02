@@ -109,8 +109,13 @@ jobs:
           git diff --stat
 
       - name: And the patched fixture is clean of what was patched
+        # `|| true` for the same reason as the three runs above, and it was missing here
+        # only because this step had never run: the job failed earlier, so the last three
+        # steps of it were dead code that had never once been executed. `bash -e` aborts
+        # the step on the CLI reporting that findings remain, which is the expected
+        # result on a fixture that is deliberately broken.
         run: |
-          node dist/cli.js demo --json > after.json
+          node dist/cli.js demo --json > after.json || true
           node -e "
             const r = require('./after.json');
             const left = r.byRule.filter(x => x.ruleId === 'A11Y-COLOR-001');
