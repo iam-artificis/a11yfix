@@ -1,7 +1,7 @@
 {
   "name": "a11yfix",
   "version": "0.1.0",
-  "description": "Fix accessibility violations in your source code. Produces a diff you can read, not a compliance claim you have to trust.",
+  "description": "Accessibility linter that writes the patch, not just the report. WCAG 2.2 and EAA, from your source: JSX, Vue, Svelte, HTML, CSS. Zero dependencies.",
   "keywords": [
     "accessibility",
     "a11y",
@@ -16,9 +16,17 @@
     "html",
     "audit",
     "report",
-    "gost",
     "gost-r-52872",
-    "accessibility-overlay"
+    "accessibility-overlay",
+    "web-accessibility",
+    "accessibility-testing",
+    "section508",
+    "ada-compliance",
+    "contrast-checker",
+    "linter",
+    "static-analysis",
+    "vue",
+    "svelte"
   ],
   "license": "Apache-2.0",
   "type": "module",

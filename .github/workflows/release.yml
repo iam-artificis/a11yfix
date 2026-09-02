@@ -1,0 +1,113 @@
+name: Release
+
+# Publishing runs from CI rather than from a laptop for one reason that is not
+# convenience: npm provenance is minted from a GitHub OIDC token, so a package published
+# by hand carries no attestation at all and the flag silently does nothing.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+jobs:
+  # The same matrix the branch gets. A tag is not a reason to publish something that was
+  # never run on Windows: the diff round-trip is where line endings break a patch.
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm test
+
+  # The tag and the version in package.json disagreeing is how a v0.2.0 release ends up
+  # containing 0.1.0. Checked before anything is published, not after.
+  version-matches-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag is the version in package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+          echo "$TAG matches package.json"
+
+  publish:
+    needs: [test, version-matches-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Mints the OIDC token provenance is built from. Without it `--provenance` fails.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      # prepublishOnly builds, but building here as well means a failure is attributed to
+      # the build rather than to the publish.
+      - run: npm run build
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # `uses: iam-artificis/a11yfix@v1` has to keep resolving, and it must never point at a
+  # commit whose npm package does not exist yet — the action shells out to
+  # `npx a11yfix@latest`, so a v1 that moves before the publish succeeds is worse than a
+  # v1 that does not move at all. Hence: after publish, never beside it.
+  #
+  # ACTION_MAJOR is not derived from the package version, and that is deliberate. The tag
+  # a workflow pins names the action's input contract — path, mode, level, token — which
+  # has its own compatibility story: the package can go 0.1.0 to 0.9.0 without any of
+  # those inputs changing. Deriving it would put the action on `v0` today and move every
+  # consumer's pin on the first minor release, which is the opposite of what a major tag
+  # is for. Raise it by hand, in the same commit that breaks an input.
+  move-major-tag:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ACTION_MAJOR: v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Point the major tag at this release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$ACTION_MAJOR" "$TAG"
+          git push -f origin "$ACTION_MAJOR"
+          echo "$ACTION_MAJOR now points at $TAG"
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Draft the release from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --title "$TAG" --notes-file CHANGELOG.md --verify-tag
