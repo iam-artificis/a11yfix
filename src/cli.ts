@@ -938,10 +938,17 @@ ${plural(needsReview, 'hunk')} ${needsReview === 1 ? 'wants' : 'want'} a human g
   return summary.totals.errors > 0 ? 1 : 0;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err: unknown) => {
-    console.error('a11yfix failed:', err instanceof Error ? err.message : String(err));
-    process.exit(2);
-  },
-);
+// process.exit() tears the process down mid-flight, and on Windows a TLS socket that
+// is still closing makes libuv abort with an assertion — the run prints its findings
+// correctly and then exits 127, which is neither of the two codes this tool documents.
+// Setting the code and letting the loop drain keeps the contract. Measured rather than
+// assumed: a URL scan still exits in well under a second, so nothing is holding the loop
+// open once the work is done.
+function finish(code: number): void {
+  process.exitCode = code;
+}
+
+main().then(finish, (err: unknown) => {
+  console.error('a11yfix failed:', err instanceof Error ? err.message : String(err));
+  finish(2);
+});
