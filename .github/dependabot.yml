@@ -1,0 +1,17 @@
+# There are no runtime dependencies and there will not be any, so this watches the two
+# things that can still go stale: the build-time toolchain and the actions CI pins.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      dev:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3

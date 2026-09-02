@@ -1,0 +1,34 @@
+name: Missed violation
+description: A real accessibility problem A11yFix did not report
+labels: ["missed"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The tool accepts missing things by design — it refuses to patch what it cannot
+        prove, and refuses to report what it cannot prove either. So the useful question
+        is whether this is a case it *could* have decided from the source.
+  - type: textarea
+    id: source
+    attributes:
+      label: The source it read
+      render: html
+    validations:
+      required: true
+  - type: input
+    id: criterion
+    attributes:
+      label: WCAG success criterion
+      placeholder: "1.4.3 Contrast (Minimum)"
+    validations:
+      required: true
+  - type: textarea
+    id: decidable
+    attributes:
+      label: Is it decidable from the source alone?
+      description: >-
+        If the colour comes from a runtime expression, a CMS or a design-token pipeline
+        that resolves outside the repository, the tool is meant to stay silent. Say what
+        makes this case different.
+    validations:
+      required: true

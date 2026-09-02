@@ -1,0 +1,41 @@
+name: New rule
+description: Propose a check A11yFix does not have
+labels: ["rule"]
+body:
+  - type: input
+    id: criterion
+    attributes:
+      label: WCAG 2.2 success criterion
+      description: >-
+        Name it first. A rule with no criterion behind it is a style preference, and this
+        tool does not ship those.
+      placeholder: "2.4.4 Link Purpose (In Context)"
+    validations:
+      required: true
+  - type: textarea
+    id: detect
+    attributes:
+      label: What the rule would report, and on what source
+      render: html
+    validations:
+      required: true
+  - type: textarea
+    id: silent
+    attributes:
+      label: When it must stay silent
+      description: >-
+        The case that looks like a violation and is not. This is the part that decides
+        whether the rule can exist — a rule that cannot be quiet is a rule that will be
+        turned off.
+    validations:
+      required: true
+  - type: dropdown
+    id: fixability
+    attributes:
+      label: Could it be fixed automatically?
+      options:
+        - "automatic — one provably correct answer, independent of context"
+        - "review — correct in the common case, worth a human glance"
+        - "manual — needs knowledge the tool does not have; advice only"
+    validations:
+      required: true

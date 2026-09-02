@@ -1,0 +1,10 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/iam-artificis/a11yfix/security/advisories/new
+    about: >-
+      This tool writes to your source files and can fetch URLs you give it. Report
+      anything that abuses either of those privately, not here.
+  - name: What is and is not covered
+    url: https://github.com/iam-artificis/a11yfix/blob/main/docs/coverage.md
+    about: Generated from the rule set — check here before filing a missed violation.

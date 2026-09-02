@@ -1,0 +1,36 @@
+name: Bug
+description: A crash, a patch that does not apply, or a wrong number
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Command and output
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Version, OS and Node version
+      placeholder: "a11yfix 0.1.0, Windows 11, Node 22.11"
+    validations:
+      required: true
+  - type: checkboxes
+    id: severity
+    attributes:
+      label: Did it change your files?
+      options:
+        - label: "`--fix` wrote something wrong into my source"

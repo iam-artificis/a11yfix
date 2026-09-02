@@ -1,0 +1,42 @@
+name: False positive
+description: A11yFix reported something that is not true
+labels: ["false positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable report this project takes. A wrong finding costs a
+        developer an afternoon and their trust in everything else the tool said, so a
+        confident-and-wrong result is treated as a worse defect than a missed one.
+  - type: textarea
+    id: source
+    attributes:
+      label: The smallest snippet that reproduces it
+      description: >-
+        Markup plus whatever CSS or Tailwind classes are needed to colour it. Reduced as
+        far as it still misbehaves — a five-line case is worth more than a repository.
+      render: html
+    validations:
+      required: true
+  - type: textarea
+    id: reported
+    attributes:
+      label: What A11yFix said
+      description: Paste the finding, including the rule id.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is wrong
+      description: What does the browser actually render, or what makes this element fine?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`npx a11yfix --version`, or the commit if you are running from source."
+    validations:
+      required: true
