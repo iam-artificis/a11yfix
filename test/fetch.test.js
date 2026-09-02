@@ -6,7 +6,18 @@ import { once } from 'node:events';
 import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fetchPage, fetchSitemap, isUrl, spread, isIncompleteChain, caIssuersFrom } from '../dist/fetch.js';
+import { X509Certificate } from 'node:crypto';
+import { rootCertificates } from 'node:tls';
+import {
+  fetchPage,
+  fetchSitemap,
+  isUrl,
+  spread,
+  isIncompleteChain,
+  caIssuersFrom,
+  isSelfSigned,
+  signedByKnownRoot,
+} from '../dist/fetch.js';
 
 /**
  * Reading a live URL is the mode that decides whether a stranger can ask a question at
@@ -585,4 +596,79 @@ test('the issuer address is read out of the extension, and only from the right l
     undefined,
     'only addresses we can actually fetch',
   );
+});
+
+/**
+ * The chain repair is only a repair because it refuses to be handed a trust store.
+ *
+ * The first version of it pushed every certificate it downloaded into `ca` and stopped
+ * walking when one named no issuer — which is the definition of a self-signed root. So a
+ * server that could not be verified could also serve, over plain http, the authority that
+ * vouched for it, and it was believed: Node's own `fetch` rejected the connection and
+ * this tool read the page. These two predicates are what closes that, so they are asserted
+ * rather than described.
+ *
+ * The fixtures are a throwaway CA and a leaf it signed, generated once and dated far out
+ * so the test does not start failing on a calendar. Nothing here touches the network:
+ * `verify()` checks a signature, and a root in Node's own store signed itself, which is
+ * both the positive case for one predicate and the reason the other exists.
+ */
+const UNTRUSTED_ROOT = `-----BEGIN CERTIFICATE-----
+MIIDSTCCAjGgAwIBAgIUNHlXYmIiPXh1WPue6CeBMWbXK8UwDQYJKoZIhvcNAQEL
+BQAwMzExMC8GA1UEAwwoQTExeUZpeCBUZXN0IFJvb3QgKG5vdCB0cnVzdGVkIGFu
+eXdoZXJlKTAgFw0yNjA5MDIxNzQ4MTdaGA8yMTI2MDgwOTE3NDgxN1owMzExMC8G
+A1UEAwwoQTExeUZpeCBUZXN0IFJvb3QgKG5vdCB0cnVzdGVkIGFueXdoZXJlKTCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALoif1AApG7mV/b8q7GPYeCt
+enWPwfnvM1yUnEpFOkn3miC1744X54qMTOy2+s6kYy0+OHVNzA+T4ikfWdPxV3hh
+5+vADXnkTS/T4FGifuMqZrH4Cov4/oknO8areQDd/ONQgtUSYlyc/e2VWrq+l69H
+14NYQLr6wslPElBBwSwG+aClONLui8Bxv3sZftdfc/IfhaQaIJ7nr3cT2vbZGlkP
+0/47mjKgs0RhN2AjRXoLVePmaV5T/q/nuEzN9T2hpqDQ3JKAs9jz3SQgFagyvuXK
+OFQwzNluQ0JyWQXBd8mRwcyQQtwFwJnwUOVCuglRLmeFegD6z0gsgIOeyFEtJusC
+AwEAAaNTMFEwHQYDVR0OBBYEFFK2hmxD9ao1OfQKIST5EjqLzkANMB8GA1UdIwQY
+MBaAFFK2hmxD9ao1OfQKIST5EjqLzkANMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggEBAIkJ2US7+K/ExvnspAViQAr+XaOHLv/2w0zpu5EeKAUMHqqR
+9YShU7EVYZQcH7rCJxWLC3zI2/Wprug9dYp8ig/c0+r+3SjJjKiIDLjakawLfdPf
+piD8263c5db8WezcHF4D5gmQ1icHMLnOgi+yM97bmXnafr+xvB5NaEWgkiZo5ElY
+/kmnZGPeXlgzBAhmKt+Lou/RCsfcCANXejJQ9Jt39NqA5ZPl3uAb/gcdzVNTAdHd
+KXKFnAnAtqQxGK3miSYxY4PysHEXEpU9igCxG5SBGDP8RtioiokbgiXX4nKz6Z8D
+T9zwh2aVtNXnSp2s/bWLV1VVCb/pzifZkXziij0=
+-----END CERTIFICATE-----`;
+
+const UNTRUSTED_LEAF = `-----BEGIN CERTIFICATE-----
+MIIDejCCAmKgAwIBAgIUF2wwatMfd61va57y+eB8oU9ZsqcwDQYJKoZIhvcNAQEL
+BQAwMzExMC8GA1UEAwwoQTExeUZpeCBUZXN0IFJvb3QgKG5vdCB0cnVzdGVkIGFu
+eXdoZXJlKTAgFw0yNjA5MDIxNzQ4MThaGA8yMTI2MDgwOTE3NDgxOFowFzEVMBMG
+A1UEAwwMdGVzdC5pbnZhbGlkMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
+AQEA0TuSZLL3PY3a9OlFIqYLh480lPVJeGAmUk/+Af1aOH2R1uuim3RWDmJ7ikHW
+TLqikVV+TEBtuskwJr0SeQ6SKgnc7QalYHzCQWM8cEQGcqSduU7ySlOIEbI0HAeb
+Hv+CCNDpDZQaCuKpnoKhgDfqbS6N1z4rrqH91gQlNa7M6siQVZ9kgPjKzv9+AL/P
+wqt/pSNZ5/p+GYFVPVjfn3TjnZCErotG7GWq9wsXqFOgadeFOCfSTiKaiJnrosN9
+QIKv8DQ4xl+cYzuocqFhoxOYCapXWYP8DUl7j+2i3+NPCbg+gktDaKMOxZEXKTxa
+cVQund78PPiC3YHglz1CiyAgbQIDAQABo4GfMIGcMBcGA1UdEQQQMA6CDHRlc3Qu
+aW52YWxpZDAJBgNVHRMEAjAAMDYGCCsGAQUFBwEBBCowKDAmBggrBgEFBQcwAoYa
+aHR0cDovL3Rlc3QuaW52YWxpZC9jYS5kZXIwHQYDVR0OBBYEFPK/wIxIttRCtJWG
+CNENbHXrI1KTMB8GA1UdIwQYMBaAFFK2hmxD9ao1OfQKIST5EjqLzkANMA0GCSqG
+SIb3DQEBCwUAA4IBAQCmwOW1VHOdVqxtezXX5Sb5zw5Bp60IGAh+ixJP74OYgeYB
+Sk/g8o4TBJUGULab69tTAbJQBa+j/5zs0UeyeOGZ0F+WSCxXZIm4nR9ZOzm46WYS
+Bro0T3saUS6qvIJYHg1rfkclM344uYAVp5Zw9Zu/Z+AGwZ+aTsVYwTFeqVZGhupq
+mLyXpy5YO1J4wvCU5h8Nmmy+XyL1RxHkwOJ79txvqrn6oVu1VAqVvuUBRlcUOjiT
+J/eMrrwEGmlqPZfYBsiLfEx9G9Q1P4CqxHxtQLfp7PO6HqdZZul2XjG+b4wgTN5N
+PgCPpC6f/OLNa0XkDGpifqg+x4ob2fDbLutw4hCT
+-----END CERTIFICATE-----`;
+
+test('a certificate that signed itself is recognised as a root, not a link', () => {
+  assert.equal(isSelfSigned(new X509Certificate(UNTRUSTED_ROOT)), true);
+  assert.equal(isSelfSigned(new X509Certificate(UNTRUSTED_LEAF)), false);
+  // Every anchor in the store is self-signed. That is exactly why one arriving over the
+  // wire cannot be told apart from a real one by anything but where it came from.
+  assert.equal(isSelfSigned(new X509Certificate(rootCertificates[0])), true);
+});
+
+test('a certificate is only trusted when a root already in the store signed it', () => {
+  // The forged leaf is signed by the forged root. Serving that root at the address the
+  // leaf names is the whole attack, and it has to answer false here.
+  assert.equal(signedByKnownRoot(new X509Certificate(UNTRUSTED_LEAF)), false);
+  assert.equal(signedByKnownRoot(new X509Certificate(UNTRUSTED_ROOT)), false);
+  // A root in Node's store is signed by a root in Node's store: itself.
+  assert.equal(signedByKnownRoot(new X509Certificate(rootCertificates[0])), true);
 });

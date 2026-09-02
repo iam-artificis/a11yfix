@@ -90,10 +90,20 @@ function readable(err: unknown): string {
  * So we do what the browser does and no more:
  *
  *  - only after a request has already failed with UNABLE_TO_VERIFY_LEAF_SIGNATURE;
- *  - only the certificate the leaf itself names, at the address the leaf itself gives;
- *  - and then the request is retried with verification fully on, so the completed chain
- *    still has to reach a root in Node's own store. Nothing is trusted that would not
- *    have been trusted had the server been configured correctly.
+ *  - only certificates the chain itself names, at the addresses the chain itself gives;
+ *  - every one of them checked before it is used: a self-signed certificate is refused,
+ *    and the walk has to end at one that a root already in Node's own store signed;
+ *  - and then the request is retried with verification fully on. Nothing is trusted that
+ *    would not have been trusted had the server been configured correctly.
+ *
+ * The third of those is load-bearing and was missing for a while, so it is worth saying
+ * why it is there. `ca:` in Node is the trust store, not a hint — anything in it is an
+ * anchor. The first version of this walk pushed every certificate it downloaded and
+ * stopped when one named no issuer, which is the definition of a self-signed root: so an
+ * attacker who could answer for the host could also serve, over plain http, the authority
+ * that vouched for their own certificate, and it was believed. `fetch()` rejected the
+ * connection; this code read the page. The comment you are reading claimed the opposite
+ * was true for four commits, which is worse than having had no comment at all.
  *
  * What this deliberately does not do is rescue a site whose root is not in Node's store
  * at all. A page signed by a national CA nobody else carries still fails after this, and
@@ -206,31 +216,145 @@ export function caIssuersFrom(infoAccess: string | undefined): string | undefine
 const MAX_CHAIN_FETCHES = 4;
 
 /**
+ * Node's own trust anchors, parsed once and indexed by the name they issue under.
+ *
+ * A lookup that misses falls back to the whole store rather than to "no match": the two
+ * names come from the same formatter on both sides so an exact hit is the normal case,
+ * but a miss here would turn "verified against a root" into "no repair at all", and that
+ * failure would read as the remote server's fault rather than ours.
+ */
+let rootsBySubject: Map<string, X509Certificate[]> | undefined;
+function rootsIssuing(issuer: string): readonly X509Certificate[] {
+  if (rootsBySubject === undefined) {
+    rootsBySubject = new Map();
+    for (const pem of rootCertificates) {
+      let root: X509Certificate;
+      try {
+        root = new X509Certificate(pem);
+      } catch {
+        continue;
+      }
+      const found = rootsBySubject.get(root.subject);
+      if (found === undefined) rootsBySubject.set(root.subject, [root]);
+      else found.push(root);
+    }
+  }
+  return rootsBySubject.get(issuer) ?? [...rootsBySubject.values()].flat();
+}
+
+/**
+ * True when this certificate signed itself — it is a root, not a link in a chain.
+ *
+ * Exported for the tests: this predicate and the one below it are the whole reason the
+ * chain repair is a repair rather than a way to hand the tool a trust store, and a
+ * property that load-bearing should be asserted rather than described.
+ */
+export function isSelfSigned(cert: X509Certificate): boolean {
+  try {
+    return cert.verify(cert.publicKey);
+  } catch {
+    // A key type that cannot check its own signature is not one we can reason about.
+    return true;
+  }
+}
+
+/** True when a root already in Node's store signed this certificate. Exported for the tests. */
+export function signedByKnownRoot(cert: X509Certificate): boolean {
+  for (const root of rootsIssuing(cert.issuer)) {
+    try {
+      if (cert.verify(root.publicKey)) return true;
+    } catch {
+      // Wrong key type for this signature. Not a match; keep looking.
+    }
+  }
+  return false;
+}
+
+/**
+ * An address a certificate named, and whether we are willing to fetch it.
+ *
+ * The AIA address is the one place in this file where a remote party chooses, in full,
+ * where the tool makes a request — and it does so from a certificate that has not been
+ * verified yet. Refusing the obvious internal targets costs nothing.
+ *
+ * This checks literals only. A hostname that resolves into a private range still gets
+ * through, and closing that needs per-hop address validation on every fetch this file
+ * makes, which is a larger change than this one. Said plainly rather than left implied:
+ * the guarantee here is "not trivially pointed at your own network", not "not pointed at
+ * your own network".
+ */
+function isFetchableAddress(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) return false;
+  if (host === '::1' || host === '::' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
+    return false;
+  }
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4 !== null) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 0 || a === 10 || a >= 224) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+  }
+  return true;
+}
+
+/**
  * Everything this host's server should have sent and did not, nearest link first.
  *
- * One hop is enough for the six sites this was written for, and not enough in general:
- * a leaf can be two links below the nearest root, and fetching only the first leaves the
+ * One hop is enough for the six sites this was written for, and not enough in general: a
+ * leaf can be two links below the nearest root, and fetching only the first leaves the
  * retry failing with UNABLE_TO_GET_ISSUER_CERT instead. So it follows each certificate's
- * own AIA address upward until one of them is signed by something already in the store,
- * which is what a browser does. A self-signed root names no issuer, so the walk ends on
- * its own; the bound and the visited set are there for a certificate that names itself.
+ * own AIA address upward.
+ *
+ * What makes this a repair rather than a way to hand the tool a trust store is that the
+ * walk only succeeds when it *arrives somewhere already trusted*. Everything fetched here
+ * came over plain http from an address written into a certificate nobody has verified, so
+ * it has to earn its place:
+ *
+ *  - a self-signed certificate is refused outright. It is a root, and a root that arrived
+ *    over the wire is precisely the thing that must never become an anchor. The first
+ *    version of this code pushed one and then stopped walking, because a root names no
+ *    issuer — so an attacker who could answer for the host could also supply the authority
+ *    that vouched for it, and `ca:` in Node means "trust this", not "consider this";
+ *  - the walk has to end at a certificate a root in Node's own store signed. If it runs
+ *    out of links, or out of budget, or the last one is signed by something unknown, the
+ *    whole repair is abandoned and the original trust error stands.
+ *
+ * So an empty result is the normal answer for a server that is genuinely untrustworthy,
+ * and the caller then reports the failure it already had.
  */
 async function missingChain(host: string, port: number): Promise<readonly string[]> {
   const key = `${host}:${port}`;
   const cached = repairedChains.get(key);
   if (cached !== undefined) return cached;
+  const chain = await walkToKnownRoot(host, port);
+  repairedChains.set(key, chain);
+  return chain;
+}
+
+async function walkToKnownRoot(host: string, port: number): Promise<readonly string[]> {
   const pems: string[] = [];
   const seen = new Set<string>();
   let url = await issuerUrl(host, port);
   while (url !== undefined && pems.length < MAX_CHAIN_FETCHES && !seen.has(url)) {
     seen.add(url);
+    if (!isFetchableAddress(url)) return [];
     const cert = await downloadCertificate(url);
-    if (cert === undefined) break;
+    if (cert === undefined) return [];
+    if (isSelfSigned(cert)) return [];
     pems.push(cert.toString());
+    if (signedByKnownRoot(cert)) return pems;
     url = caIssuersFrom(cert.infoAccess);
   }
-  repairedChains.set(key, pems);
-  return pems;
+  return [];
 }
 
 /**
