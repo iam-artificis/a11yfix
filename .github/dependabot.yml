@@ -10,6 +10,17 @@ updates:
     groups:
       dev:
         patterns: ["*"]
+    # Major versions of the two build-time packages are held back deliberately. The
+    # first automatic proposal was TypeScript 5 to 7 with @types/node 24 to 26, and it
+    # failed every job: under that pair the compiler no longer sees URL, fetch,
+    # TextDecoder or AbortSignal, so src/fetch.ts stops type-checking in twenty places.
+    # That is a migration somebody has to sit down and do, not a bump to merge on a
+    # Monday, and a pull request that can never go green is worse than no pull request.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
