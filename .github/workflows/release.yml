@@ -62,6 +62,23 @@ jobs:
       # prepublishOnly builds, but building here as well means a failure is attributed to
       # the build rather than to the publish.
       - run: npm run build
+      # A missing secret otherwise surfaces as a 401 from the registry, which reads like
+      # the package name is taken rather than like nobody has added the token yet.
+      - name: The publish token is configured
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "token present"
+
+      # Once 0.1.0 exists on the registry, this can move to npm trusted publishing: set
+      # this repository and this workflow filename as a trusted publisher on npmjs.com,
+      # then drop NODE_AUTH_TOKEN and the --provenance flag, which becomes automatic. It
+      # cannot be set up first, because npm configures trusted publishers per package and
+      # the package has to exist to have settings.
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
         env:
