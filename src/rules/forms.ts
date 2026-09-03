@@ -650,6 +650,12 @@ const placeholderAsLabel: Rule = {
 const checkableWithoutName: Rule = {
   id: 'A11Y-FORM-003',
   title: 'Checkbox or radio has no name attribute',
+  // Listed here as the union of what the rule can cite; each finding carries only the
+  // half that applies to it. A radio group with no shared name really is 1.3.1: the
+  // grouping relationship stops being programmatically determinable, and assistive
+  // technology announces four isolated controls instead of "1 of 4". A lone checkbox
+  // with no name submits nothing — a bug in the form, with no barrier behind it and no
+  // criterion to cite.
   wcag: ['1.3.1'],
   level: 'A',
   severity: 'warning',
@@ -672,7 +678,7 @@ const checkableWithoutName: Rule = {
       out.push(
         ctx.report({
           ruleId: checkableWithoutName.id,
-          wcag: checkableWithoutName.wcag,
+          wcag: isRadio ? ['1.3.1'] : [],
           level: 'A',
           severity: 'warning',
           start: el.openStart,

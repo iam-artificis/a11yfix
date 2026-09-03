@@ -17,6 +17,13 @@ machine question; the second is not, and no amount of engineering changes that.
 Passing every check in this tool is not conformance. It means the machine-checkable
 part is clean and the human review can start from a smaller pile.
 
+The table below lists what a rule **can** cite, which is not always what a given
+finding cites. A handful of rules answer the question per element rather than once: a
+duplicate `id` breaks 1.3.1 and 4.1.2 when an `aria-labelledby` or a `<label for>`
+resolves to it, and is only a bug when nothing does; a `<video>` with no captions is
+1.2.2 while a `<audio>` is 1.2.1. The criterion printed next to a finding is the one
+that applies to it.
+
 ## Criteria this tool checks
 
 | SC | Level | Name | Rules |
@@ -33,7 +40,7 @@ part is clean and the human review can start from a smaller pile.
 | 2.4.1 | A | Bypass Blocks | A11Y-DOC-014, A11Y-DOC-015 |
 | 2.4.2 | A | Page Titled | A11Y-DOC-003 |
 | 2.4.3 | A | Focus Order | A11Y-KBD-001 |
-| 2.4.4 | A | Link Purpose (In Context) | A11Y-IMG-005, A11Y-FORM-005, A11Y-LINK-001, A11Y-LINK-002, A11Y-LINK-003, A11Y-LINK-006, A11Y-LINK-008 |
+| 2.4.4 | A | Link Purpose (In Context) | A11Y-IMG-005, A11Y-FORM-005, A11Y-LINK-001, A11Y-LINK-002, A11Y-LINK-003, A11Y-LINK-006 |
 | 2.4.7 | AA | Focus Visible | A11Y-KBD-010 |
 | 3.1.1 | A | Language of Page | A11Y-DOC-001, A11Y-DOC-002 |
 | 3.3.2 | A | Labels or Instructions | A11Y-FORM-001, A11Y-FORM-002, A11Y-FORM-007, A11Y-FORM-008 |
@@ -172,6 +179,6 @@ language are all judgements about intent. The tool marks them and refuses to gue
 | `A11Y-LINK-005` | 3.2.5 | AAA | New window opened without warning |
 | `A11Y-LINK-006` | 2.4.4, 2.4.9 | A | Identical link text, different destinations |
 | `A11Y-LINK-007` | 4.1.2 | A | Anchor used as a button |
-| `A11Y-LINK-008` | 2.4.4 | A | Fragment link with no target |
+| `A11Y-LINK-008` | — | A | Fragment link with no target |
 | `A11Y-LINK-009` | — | A | Adjacent duplicate links |
 | `A11Y-TODO-001` | — | A | An A11yFix placeholder is still in the source |

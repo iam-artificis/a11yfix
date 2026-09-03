@@ -844,6 +844,11 @@ const HAS_TRACK_TAG = /<track[\s>/]/i;
 const mediaMissingCaptions: Rule = {
   id: 'A11Y-IMG-008',
   title: 'Media element has no captions track',
+  // The union of both cases; a finding carries the one that fits the element. 1.2.2
+  // Captions (Prerecorded) is about synchronised media, so it is the video answer.
+  // Audio-only content falls under 1.2.1, and the remedy there is a transcript rather
+  // than captions — which is what the advice already says, so citing both on both was
+  // the one part that did not match.
   wcag: ['1.2.1', '1.2.2'],
   level: 'A',
   severity: 'warning',
@@ -877,7 +882,7 @@ const mediaMissingCaptions: Rule = {
       out.push(
         ctx.report({
           ruleId: mediaMissingCaptions.id,
-          wcag: mediaMissingCaptions.wcag,
+          wcag: isVideo ? ['1.2.2'] : ['1.2.1'],
           level: 'A',
           severity: 'warning',
           start: el.openStart,

@@ -1149,7 +1149,13 @@ const anchorAsButton: Rule = {
 const brokenFragment: Rule = {
   id: 'A11Y-LINK-008',
   title: 'Fragment link with no target',
-  wcag: ['2.4.4'],
+  // No criterion, and the honest reason is worth writing down. 2.4.4 Link Purpose is
+  // about whether the link's *text* says where it goes; a link whose text is perfect and
+  // whose target does not exist passes it. 4.1.1 Parsing would have been the nearest fit
+  // and was removed from WCAG in 2.2. So this is a real defect that the standard has no
+  // success criterion for, and claiming one would be borrowing authority the finding does
+  // not have.
+  wcag: [],
   level: 'A',
   severity: 'warning',
   summary: 'An in-page link points at an id that this document never defines.',

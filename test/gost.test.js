@@ -6,6 +6,9 @@ import { renderReport } from '../dist/report.js';
 import { CRITERIA } from '../dist/wcag.js';
 import { GOST_CRITERIA, GOST_NAME, gost, gostSection } from '../dist/gost.js';
 import { strings } from '../dist/i18n/index.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 /**
  * ГОСТ Р 52872-2019 is the reason the Russian report exists: the buyer is holding a
@@ -145,4 +148,41 @@ test('a criterion with no entry falls back to English rather than to nothing', (
   const ru = strings('ru').ui;
   assert.equal(ru.criterionName('2.4.11', 'Focus Not Obscured'), '2.4.11 Focus Not Obscured');
   assert.equal(ru.criterionName('1.4.3', 'Contrast (Minimum)'), '1.4.3 Контрастность (минимальные требования) (п. 4.1.4)');
+});
+
+const GOST_DOC = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'gost.md');
+
+test('the rules docs/gost.md lists under each criterion are the rules that cite it', () => {
+  // gost.md is written by hand and repeats, in Russian, data that docs/coverage.md
+  // generates. That is a reasonable split — the surrounding prose is the point of the
+  // file and could not be generated — but it means the two can drift, and the drift is
+  // invisible: both files stay valid Markdown and only the claim stops being true.
+  // Changing a rule's criteria is exactly when it happens, so it is checked rather than
+  // remembered.
+  const bySc = new Map();
+  for (const rule of ALL_RULES) {
+    for (const sc of rule.wcag) {
+      if (!bySc.has(sc)) bySc.set(sc, []);
+      bySc.get(sc).push(rule.id);
+    }
+  }
+
+  const ROW = /^\|\s*([0-9]+\.[0-9]+\.[0-9]+)\s*\|[^|]*\|[^|]*\|[^|]*\|\s*([^|]*)\|/;
+  let checked = 0;
+  for (const line of readFileSync(GOST_DOC, 'utf8').split('\n')) {
+    const m = ROW.exec(line);
+    if (m === null) continue;
+    const listed = m[2]
+      .split(',')
+      .map((x) => x.trim())
+      .filter((x) => x.startsWith('A11Y-'));
+    if (listed.length === 0) continue;
+    checked++;
+    assert.deepEqual(
+      [...listed].sort(),
+      [...(bySc.get(m[1]) ?? [])].sort(),
+      'docs/gost.md and the rule set disagree about which rules cite ' + m[1],
+    );
+  }
+  assert.ok(checked >= 15, 'the table was not read: only ' + checked + ' criteria matched');
 });

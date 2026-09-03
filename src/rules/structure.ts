@@ -715,9 +715,57 @@ const singleH1: Rule = {
 // A11Y-DOC-006 — duplicate id
 // ---------------------------------------------------------------------------
 
+/**
+ * Attributes whose value is an id, or a space-separated list of ids, and whose target
+ * resolving to the wrong element breaks either the accessible name or a programmatic
+ * relationship.
+ *
+ * This list is what decides whether a duplicate id is a WCAG failure or only a bug. A
+ * duplicate that one of these points at really does break 1.3.1 and 4.1.2: the reference
+ * resolves to the first match and stops, so one control borrows another's name. A
+ * duplicate nothing points at breaks neither, and the criterion that used to cover it —
+ * 4.1.1 Parsing — was removed in WCAG 2.2.
+ */
+const IDREF_ATTRS: ReadonlySet<string> = new Set([
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-details',
+  'aria-errormessage',
+  'aria-controls',
+  'aria-owns',
+  'aria-flowto',
+  'aria-activedescendant',
+  'for',
+  'htmlfor',
+  'headers',
+  'list',
+  'form',
+]);
+
+/** Every id this document resolves through one of those attributes. */
+function referencedIds(ctx: RuleContext): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const el of ctx.markup.elements) {
+    for (const a of el.attrs) {
+      const name = a.nameLower.replace(/^(?::|v-bind:|x-bind:)/, '');
+      if (!IDREF_ATTRS.has(name)) continue;
+      const value = a.value;
+      // A computed reference may well point here. We cannot read it, so we do not get to
+      // claim that it does not.
+      if (value === null || looksInterpolated(value)) continue;
+      for (const token of value.trim().split(/s+/)) {
+        if (token !== '') out.add(token);
+      }
+    }
+  }
+  return out;
+}
+
 const uniqueIds: Rule = {
   id: 'A11Y-DOC-006',
   title: 'Duplicate id',
+  // The union of what this rule can cite. Which of the two a finding carries — or
+  // neither — is decided per duplicate, by whether anything actually resolves the id.
   wcag: ['1.3.1', '4.1.2'],
   level: 'A',
   severity: 'error',
@@ -737,9 +785,12 @@ const uniqueIds: Rule = {
       else bucket.push(el);
     }
 
+    const referenced = referencedIds(ctx);
+
     const out: Violation[] = [];
     for (const [id, els] of byId) {
       if (els.length < 2) continue;
+      const isReferenced = referenced.has(id);
       const lines = els.map((e) => lineOf(ctx, e.openStart));
       // One collision is one finding, reported at the first occurrence and listing the
       // rest. Emitting a violation per element was technically defensible and useless in
@@ -752,20 +803,29 @@ const uniqueIds: Rule = {
       out.push(
         ctx.report({
           ruleId: uniqueIds.id,
-          wcag: uniqueIds.wcag,
+          wcag: isReferenced ? uniqueIds.wcag : [],
           level: uniqueIds.level,
-          severity: uniqueIds.severity,
+          severity: isReferenced ? 'error' : 'warning',
           start: attr === undefined ? first.openStart : attr.nameStart,
           end: attr === undefined ? first.openEnd : attr.valueEnd,
           message:
             'id="' + id + '" is used ' + els.length + ' times in this file. This is the ' +
             'first; the other' + (rest.length === 1 ? ' is' : 's are') + ' on line' +
             (rest.length === 1 ? ' ' : 's ') + rest.join(', ') + '.',
-          impact:
-            'aria-labelledby, aria-describedby, aria-controls and <label for> all ' +
-            'resolve to the first element with the id and stop. Every later ' +
-            'duplicate silently borrows the first one\'s label, so a screen reader ' +
-            'announces the wrong name for the control the user is actually on.',
+          impact: isReferenced
+            ? 'Something in this file resolves this id, and aria-labelledby, ' +
+              'aria-describedby, aria-controls and <label for> all resolve to the first ' +
+              'element with it and stop. Every later duplicate silently borrows the ' +
+              'first one\'s label, so a screen reader announces the wrong name for the ' +
+              'control the user is actually on.'
+            : 'Nothing in this file resolves this id — no aria-* reference, no label, ' +
+              'no headers — so no name and no relationship is broken by it today, which ' +
+              'is why this is a warning rather than a failure. It is still wrong: CSS, ' +
+              'querySelector and any inbound #fragment link already reach the first of ' +
+              'them and stop, and the next aria-labelledby written against this id will ' +
+              'bind to the wrong element without saying so. WCAG has no criterion for ' +
+              'it — 4.1.1 Parsing, which used to cover exactly this, was removed in ' +
+              'WCAG 2.2.',
           // Renaming is not ours to do: the id is a contract with stylesheets,
           // scripts, tests and inbound #fragment links we cannot see from here.
           fix: advice(

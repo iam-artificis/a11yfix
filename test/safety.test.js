@@ -481,3 +481,107 @@ test('a file the analyser cannot read is a finding about that file, not the end 
     'a prototype key in a stylesheet is ordinary unsupported input, not a failure',
   );
 });
+
+/**
+ * A criterion next to a finding is a citation, and a wrong one is worse than none.
+ *
+ * It borrows the standard's authority for a claim the standard does not make, and the
+ * reader most likely to check — somebody holding a conformance obligation — is exactly
+ * the reader who will find it. Four rules used to cite a criterion that did not fit the
+ * finding they were attached to; each is asserted here against the case that decides it.
+ */
+const doc = (body) =>
+  '<!doctype html><html lang="en"><head><title>t</title></head><body><main>' +
+  body +
+  '</main></body></html>';
+
+const cite = (source, ruleId) =>
+  run('t.html', doc(source))
+    .violations.filter((v) => v.ruleId === ruleId)
+    .map((v) => ({ severity: v.severity, wcag: [...v.wcag] }));
+
+test('a duplicate id is a WCAG failure only when something resolves it', () => {
+  // 4.1.1 Parsing, which used to cover duplicate ids outright, was removed in WCAG 2.2.
+  // What remains is the case the impact text actually describes: a reference resolving
+  // to the first match and stopping, so one control borrows another's name.
+  assert.deepEqual(cite('<p id="x">a</p><p id="x">b</p>', 'A11Y-DOC-006'), [
+    { severity: 'warning', wcag: [] },
+  ]);
+  assert.deepEqual(
+    cite('<p id="x">a</p><p id="x">b</p><button aria-labelledby="x">go</button>', 'A11Y-DOC-006'),
+    [{ severity: 'error', wcag: ['1.3.1', '4.1.2'] }],
+  );
+  assert.deepEqual(cite('<label for="x">N</label><input id="x"><input id="x">', 'A11Y-DOC-006'), [
+    { severity: 'error', wcag: ['1.3.1', '4.1.2'] },
+  ]);
+  // A #fragment link resolves the id too, but nothing about a name or a relationship
+  // breaks: the link lands on the first of them, which is a bug with no criterion.
+  assert.deepEqual(cite('<a href="#x">go</a><p id="x">a</p><p id="x">b</p>', 'A11Y-DOC-006'), [
+    { severity: 'warning', wcag: [] },
+  ]);
+});
+
+test('a radio group without a name is 1.3.1; a checkbox without one is not', () => {
+  // Radios sharing no name are not a group, and the grouping relationship is exactly
+  // what 1.3.1 is about. A checkbox with no name submits nothing — a defect in the form
+  // with no barrier behind it.
+  assert.deepEqual(cite('<form><input type="radio"><input type="radio"></form>', 'A11Y-FORM-003'), [
+    { severity: 'warning', wcag: ['1.3.1'] },
+    { severity: 'warning', wcag: ['1.3.1'] },
+  ]);
+  assert.deepEqual(
+    cite('<form><input type="checkbox" id="c"><label for="c">x</label></form>', 'A11Y-FORM-003'),
+    [{ severity: 'warning', wcag: [] }],
+  );
+});
+
+test('captions are 1.2.2 for video and 1.2.1 for audio-only', () => {
+  // 1.2.2 Captions (Prerecorded) is about synchronised media. Audio-only falls under
+  // 1.2.1, where the remedy is a transcript rather than captions — which is what this
+  // rule's own advice already said while it cited both criteria on both elements.
+  assert.deepEqual(cite('<video src="v.mp4"></video>', 'A11Y-IMG-008'), [
+    { severity: 'warning', wcag: ['1.2.2'] },
+  ]);
+  assert.deepEqual(cite('<audio src="a.mp3"></audio>', 'A11Y-IMG-008'), [
+    { severity: 'warning', wcag: ['1.2.1'] },
+  ]);
+});
+
+test('a fragment link with no target cites no criterion', () => {
+  // 2.4.4 Link Purpose is about whether the link text says where it goes. A link whose
+  // text is perfect and whose target does not exist passes it.
+  assert.deepEqual(cite('<a href="#nope">go</a>', 'A11Y-LINK-008'), [
+    { severity: 'warning', wcag: [] },
+  ]);
+});
+
+test('a finding never cites a criterion its rule does not declare', () => {
+  // Rules may cite a subset of what they declare — three of them decide per element.
+  // Citing something outside the declaration is different: docs/coverage.md is built
+  // from the declarations, so it would understate the tool in a file that promises not
+  // to overstate it, and the drift would be invisible from either side.
+  const byId = new Map(ALL_RULES.map((r) => [r.id, r]));
+  const sources = [
+    '<p id="x">a</p><p id="x">b</p><button aria-labelledby="x">go</button>',
+    '<form><input type="radio"><input type="checkbox"></form>',
+    '<video src="v.mp4"></video><audio src="a.mp3"></audio>',
+    '<a href="#nope">go</a><a href="/x"><img src="i.png"></a>',
+    '<table><tr><td>1</td></tr></table><iframe src="/x"></iframe>',
+    '<span onclick="go()">press</span><input placeholder="Name">',
+  ];
+  let checked = 0;
+  for (const source of sources) {
+    for (const v of run('t.html', doc(source)).violations) {
+      const rule = byId.get(v.ruleId);
+      if (rule === undefined) continue; // A11Y-META-001 is emitted by the engine
+      for (const sc of v.wcag) {
+        checked++;
+        assert.ok(
+          rule.wcag.includes(sc),
+          v.ruleId + ' cited ' + sc + ', which it does not declare',
+        );
+      }
+    }
+  }
+  assert.ok(checked > 20, 'too few citations checked: ' + checked);
+});

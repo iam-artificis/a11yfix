@@ -84,13 +84,18 @@ or a background image instead of pretending the colour underneath is what you se
 
 Contrast is three of the 70 rules. The rest cover images and media alternatives, form
 labelling, document structure, keyboard operability, ARIA correctness, and link semantics.
-59 of them name the WCAG success criterion they implement. The other 11 are things every
+58 of them name the WCAG success criterion they implement. The other 12 are things every
 practitioner will tell you to do that WCAG has no criterion for — a page with no `<main>`,
-an `accesskey`, a data table with no caption — and 10 of them are reported as warnings or
-information rather than as errors. The eleventh, `A11Y-TODO-001`, is not about the page:
-it reports a placeholder this tool itself wrote, and it is an error precisely so that an
-unfinished fix cannot pass as a finished one. [docs/coverage.md](docs/coverage.md) says
-which rule is which.
+an `accesskey`, a data table with no caption, an in-page link whose target does not exist
+— and all but one are reported as warnings or information rather than as errors. The
+exception is `A11Y-TODO-001`, which is not about the page at all: it reports a placeholder
+this tool itself wrote, and it is an error precisely so that an unfinished fix cannot pass
+as a finished one. [docs/coverage.md](docs/coverage.md) says which rule is which.
+
+Three rules cite a criterion for some of their findings and none for others, because the
+answer genuinely depends on the page: a duplicate `id` breaks 1.3.1 and 4.1.2 when an
+`aria-labelledby` or a `<label for>` resolves to it and is only a bug when nothing does.
+The finding says which it is; the coverage table lists what a rule can cite.
 
 One of those 11 is different in kind from the rest. A11Y-DOC-016 reports an accessibility
 overlay — accessiBe, UserWay, AudioEye, or the `bvi.js` «версия для слабовидящих» switch
