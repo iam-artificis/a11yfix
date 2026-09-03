@@ -27,16 +27,29 @@ stylesheets it links from its own origin, and follows redirects itself rather th
 `fetch` do it — because following a redirect is the only moment the tool connects
 somewhere nobody asked it to.
 
-The rule is about the boundary, not the destination. **A scan that starts on the public
-internet is never redirected into a private network**: loopback, link-local — including
-`169.254.169.254`, the cloud metadata service — RFC1918, carrier-grade NAT, unique-local
-and multicast are all refused as a redirect target, and the hostname is *resolved* before
-it is judged, because `127.0.0.1.nip.io` is a public name pointing at loopback and anyone
-can register another. A redirect out of `http`/`https` is refused outright.
+The rule is about the boundary, not the destination: **a scan that starts on the public
+internet is refused when a redirect would take it into a private network.** Loopback,
+link-local — including `169.254.169.254`, the cloud metadata service — RFC1918,
+carrier-grade NAT, unique-local and multicast are all refused as a redirect target, and
+the hostname is *resolved* before it is judged, because `127.0.0.1.nip.io` is a public
+name pointing at loopback and anyone can register another. Addresses are classified by
+their bytes rather than by how they are spelled: `http://[::ffff:127.0.0.1]/` is
+normalised by `new URL` to `[::ffff:7f00:1]`, and a check that reads the text misses it.
+A redirect out of `http`/`https` is refused outright, and a sitemap index may only send
+the tool to child sitemaps on the origin it was fetched from.
 
 A scan that starts private is your own network already, so `a11yfix http://localhost:3000`
 works and follows its redirects normally. Refusing that would be a security check that
 makes the tool worse at the thing it is for.
+
+**The limit of that guarantee, stated rather than glossed.** The address is resolved to
+decide, and resolved again by the HTTP client to connect — two lookups, and a name server
+that answers them differently defeats the check. The only real fix is to pin the address
+that was judged into the socket that is opened, and no Node API reaches that far without a
+custom `undici` dispatcher, which zero runtime dependencies rules out. So read the claim
+as what it is: it stops a redirect chain from wandering into your network, not an attacker
+who controls DNS for a name you chose to scan. If that is your threat model, run the tool
+where a private address cannot be reached at all — the network is the right layer for it.
 
 The address a certificate names for its issuer is held to the stricter rule — always
 public, whatever is being scanned — because that address is chosen entirely by the remote
@@ -67,6 +80,10 @@ rejected such a connection; a11yfix read the page.
 
 Both halves of the property are asserted in `test/fetch.test.js`, not described here.
 A change that weakens either one is a security regression regardless of what it enables.
+
+The address in the AIA extension is fetched over plain `http` by design — that is how the
+protocol works, and it is why the certificate it returns is verified against Node's roots
+before anything is done with it, rather than trusted for having arrived.
 
 ## Scope
 

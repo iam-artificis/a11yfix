@@ -288,40 +288,101 @@ export function signedByKnownRoot(cert: X509Certificate): boolean {
 }
 
 /**
- * Whether a resolved address belongs to this machine, this network, or nowhere.
+ * The four or sixteen octets behind a host, or undefined when it is a name.
+ *
+ * Classifying on the text was a mistake, and a demonstrated one. `new URL()` re-spells
+ * every address it parses, and its spelling for an IPv4-mapped IPv6 host is hexadecimal:
+ * `::ffff:127.0.0.1` arrives as `::ffff:7f00:1`. A check written against the dotted form
+ * therefore never fired on anything a URL had produced, and the test asserting it passed
+ * because it asserted the one spelling that cannot reach the code. Bytes have one
+ * spelling, so this converts first and decides afterwards.
+ */
+function addressBytes(host: string): number[] | undefined {
+  const bare = host.replace(/^\[|\]$/g, '').split('%')[0] ?? '';
+  const family = isIP(bare);
+  if (family === 4) return v4Bytes(bare);
+  if (family !== 6) return undefined;
+
+  // A trailing dotted quad is two groups written the other way round.
+  let text = bare;
+  const dotted = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(text);
+  if (dotted !== null) {
+    const quad = v4Bytes(dotted[1] as string);
+    if (quad === undefined) return undefined;
+    const hi = ((quad[0] as number) << 8) | (quad[1] as number);
+    const lo = ((quad[2] as number) << 8) | (quad[3] as number);
+    text = text.slice(0, dotted.index) + hi.toString(16) + ':' + lo.toString(16);
+  }
+
+  const [head, tail] = text.split('::') as [string, string | undefined];
+  const parse = (part: string): number[] =>
+    part === '' ? [] : part.split(':').map((g) => parseInt(g, 16));
+  const left = parse(head);
+  const right = tail === undefined ? [] : parse(tail);
+  const groups =
+    tail === undefined
+      ? left
+      : [...left, ...new Array<number>(8 - left.length - right.length).fill(0), ...right];
+  if (groups.length !== 8 || groups.some((g) => !Number.isInteger(g) || g < 0 || g > 0xffff)) {
+    return undefined;
+  }
+  return groups.flatMap((g) => [g >> 8, g & 0xff]);
+}
+
+function v4Bytes(s: string): number[] | undefined {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (m === null) return undefined;
+  const out = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  return out.every((n) => n <= 255) ? out : undefined;
+}
+
+/**
+ * Whether four octets belong to this machine, this network, or nowhere.
+ *
+ * 169.254.0.0/16 is here for one address in it rather than for link-local addressing:
+ * 169.254.169.254 is the instance-metadata service on every major cloud, it answers over
+ * plain http, and what it answers with is credentials.
+ */
+function isPrivateV4(b: readonly number[]): boolean {
+  const [a, c] = [b[0] as number, b[1] as number];
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && c === 254) return true;
+  if (a === 172 && c >= 16 && c <= 31) return true;
+  if (a === 192 && c === 168) return true;
+  if (a === 100 && c >= 64 && c <= 127) return true;
+  if (a === 198 && (c === 18 || c === 19)) return true;
+  return a >= 224;
+}
+
+/**
+ * Whether an address is one this tool refuses to be redirected to.
  *
  * Exported, with the two below it, for the tests: the public-to-private case cannot be
  * reached end to end from a test suite — it needs a genuinely public host that redirects
  * inward — so the decision itself is what gets asserted.
- *
- * The list is the usual one plus 169.254.0.0/16, which is not there for link-local
- * addressing: 169.254.169.254 is the cloud instance-metadata service on every major
- * provider, and it answers over plain http with credentials.
  */
 export function isPrivateIp(ip: string): boolean {
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
-  if (v4 !== null) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a === 198 && (b === 18 || b === 19)) return true;
-    if (a >= 224) return true;
-    return false;
+  const b = addressBytes(ip);
+  if (b === undefined) return false;
+  if (b.length === 4) return isPrivateV4(b);
+
+  // Everything that carries an IPv4 address inside an IPv6 one is judged as that address:
+  // ::ffff:a.b.c.d (mapped), ::a.b.c.d (compatible, and ::1 and :: with it), and
+  // 64:ff9b::a.b.c.d (NAT64). All three are ways to spell a v4 destination.
+  const zeroTo = (n: number): boolean => b.slice(0, n).every((x) => x === 0);
+  if (zeroTo(10) && ((b[10] === 0xff && b[11] === 0xff) || (b[10] === 0 && b[11] === 0))) {
+    return isPrivateV4(b.slice(12));
   }
-  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0] ?? '';
-  // ::ffff:127.0.0.1 is a loopback address wearing a v6 hat.
-  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(v6);
-  if (mapped !== null) return isPrivateIp(mapped[1] as string);
-  if (v6 === '::1' || v6 === '::') return true;
-  if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) {
-    return true;
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b.slice(4, 12).every((x) => x === 0)) {
+    return isPrivateV4(b.slice(12));
   }
-  if (/^f[cd]/.test(v6)) return true;
-  if (v6.startsWith('ff')) return true;
+
+  const first = b[0] as number;
+  const second = b[1] as number;
+  if ((first & 0xfe) === 0xfc) return true; // fc00::/7  unique local
+  if (first === 0xfe && (second & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  if (first === 0xfe && (second & 0xc0) === 0xc0) return true; // fec0::/10 site-local, deprecated
+  if (first === 0xff) return true; // ff00::/8  multicast
   return false;
 }
 
@@ -375,6 +436,39 @@ export async function refuseCrossingInward(
       `inside a private network, and a page you scan does not get to choose what this ` +
       `tool connects to. Scan the internal address directly if that is what you meant.`,
   );
+}
+
+/**
+ * The address a `Location` header actually points at.
+ *
+ * Header values arrive as bytes, and both undici and `node:http` hand them over decoded
+ * as latin1 — so a CMS that redirects to an unencoded `/статья` produces a string of
+ * mojibake, and passing that to `new URL` percent-encodes the mojibake instead of the
+ * path: `%C3%91%C2%81…` where the server meant `%D1%81…`. Measured, both clients: undici
+ * recovers this itself when it follows redirects internally, so doing it by hand here
+ * without the same step would be a step backwards from what `redirect: 'follow'` did.
+ *
+ * The recovery is only applied when it round-trips: a header that really was latin1 and
+ * not UTF-8 decodes to replacement characters, and then the original bytes are the better
+ * guess. Pure ASCII — every conforming redirect — passes through untouched.
+ */
+function redirectTarget(location: string, base: URL): URL {
+  let text = location;
+  if (/[\u0080-\u00ff]/.test(text)) {
+    const recovered = Buffer.from(text, 'latin1').toString('utf8');
+    if (!recovered.includes('\ufffd')) text = recovered;
+  }
+  let next: URL;
+  try {
+    next = new URL(text, base);
+  } catch {
+    throw new Error(`redirected to an address that is not a URL: ${location}`);
+  }
+  // A redirect to file:, data: or anything else is not a redirect this tool follows.
+  if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+    throw new Error(`refused to follow a redirect to ${next.protocol}//`);
+  }
+  return next;
 }
 
 /**
@@ -494,13 +588,9 @@ function getWithCa(
           // server that is misbehaving on purpose would send you down.
           let next: URL;
           try {
-            next = new URL(location, url);
-          } catch {
-            reject(new Error(`redirected to an address that is not a URL: ${location}`));
-            return;
-          }
-          if (next.protocol !== 'http:' && next.protocol !== 'https:') {
-            reject(new Error(`refused to follow a redirect to ${next.protocol}//`));
+            next = redirectTarget(location, new URL(url));
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
             return;
           }
           resolve(
@@ -596,27 +686,23 @@ async function get(url: string, limit: number): Promise<Fetched> {
     const startedPublic = !(await resolvesPrivate(origin.hostname));
     let current = origin;
     let response: Response;
+    // One deadline for the whole fetch, created before the loop rather than inside it.
+    // Per-hop it would be ten timeouts deep — a chain of slow redirects could hold a
+    // worker for minutes while every individual hop looked well behaved. The signal stays
+    // live through the body read below, so the budget covers the request end to end.
+    const deadline = AbortSignal.timeout(TIMEOUT_MS);
     for (let hop = 0; ; hop++) {
       response = await fetch(current.href, {
         headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
         redirect: 'manual',
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: deadline,
       });
       const location = response.headers.get('location');
       const isRedirect = response.status >= 300 && response.status < 400 && location !== null;
       if (!isRedirect) break;
       await response.body?.cancel();
       if (hop >= MAX_REDIRECTS) throw new Error('too many redirects');
-      let next: URL;
-      try {
-        next = new URL(location, current);
-      } catch {
-        throw new Error(`redirected to an address that is not a URL: ${location}`);
-      }
-      // A redirect to file:, data: or anything else is not a redirect this tool follows.
-      if (next.protocol !== 'http:' && next.protocol !== 'https:') {
-        throw new Error(`refused to follow a redirect to ${next.protocol}//`);
-      }
+      const next = redirectTarget(location, current);
       await refuseCrossingInward(origin, next, startedPublic);
       current = next;
     }
@@ -960,8 +1046,24 @@ export async function fetchSitemap(input: string, limit: number): Promise<Sitema
     let failed = 0;
     for (const child of children.slice(0, MAX_CHILD_SITEMAPS)) {
       if (pool.length >= poolTarget) break;
+      // The same origin check `take` applies to page entries, which this path never had:
+      // a child sitemap is a URL the scanned site chooses and this tool then requests, so
+      // without it an index could name http://169.254.169.254/… and be fetched outright —
+      // no redirect needed, and the boundary rule never consulted, because the address
+      // arrives as the origin of its own request rather than as a hop away from one.
+      let target: URL;
       try {
-        for (const loc of locs(await read(new URL(child, root).href))) take(loc);
+        target = new URL(child, root);
+      } catch {
+        failed++;
+        continue;
+      }
+      if (target.origin !== root.origin) {
+        failed++;
+        continue;
+      }
+      try {
+        for (const loc of locs(await read(target.href))) take(loc);
       } catch {
         failed++;
       }

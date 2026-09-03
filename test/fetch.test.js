@@ -806,3 +806,89 @@ test('the redirect cap is a real bound, and it is not tighter than the web is', 
     },
   );
 });
+
+test('a sitemap index may not send the scan to another host', async () => {
+  // A sitemap index is the one document that hands a remote party a whole URL for this
+  // tool to GET, with no page ever rendered from it — the reply is parsed as XML and its
+  // <loc> entries end up in the report. Page URLs were already filtered to the origin;
+  // child sitemaps were not, which made an index the shortest path from "scan my site"
+  // to a request against 169.254.169.254 with the answer reflected back.
+  let internalHits = 0;
+  const internal = createServer((req, res) => {
+    internalHits += 1;
+    res.writeHead(200, { 'content-type': 'application/xml' });
+    res.end('<?xml version="1.0"?><urlset><url><loc>http://elsewhere.invalid/leaked</loc></url></urlset>');
+  });
+  internal.listen(0, '127.0.0.1');
+  await once(internal, 'listening');
+  const internalPort = internal.address().port;
+
+  try {
+    await withServer(
+      (req, res) => {
+        const origin = `http://127.0.0.1:${res.socket.localPort}`;
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        if (req.url === '/sitemap.xml') {
+          res.end(
+            '<?xml version="1.0"?><sitemapindex>' +
+              `<sitemap><loc>http://127.0.0.1:${internalPort}/latest/meta-data/</loc></sitemap>` +
+              `<sitemap><loc>${origin}/real.xml</loc></sitemap>` +
+              '</sitemapindex>',
+          );
+          return;
+        }
+        res.end(sitemapOf([`${origin}/a/`, `${origin}/b/`]));
+      },
+      async (base) => {
+        const r = await fetchSitemap(`${base}/sitemap.xml`, 6);
+        assert.equal(internalHits, 0, 'the foreign sitemap was fetched');
+        assert.ok(
+          r.urls.every((u) => u.startsWith(base)),
+          `a URL escaped the origin: ${r.urls.join(' ')}`,
+        );
+        // The same-origin child is still read, so the check is a boundary and not a ban.
+        assert.ok(r.urls.some((u) => u.endsWith('/a/')));
+        assert.ok(
+          r.notes.some((n) => n.includes('could not be read')),
+          'the skipped sitemap was not reported: a silent drop reads as an empty site',
+        );
+      },
+    );
+  } finally {
+    internal.close();
+    await once(internal, 'close');
+  }
+});
+
+test('a Location header carrying raw UTF-8 resolves to the path the server meant', async () => {
+  // Header values arrive as bytes and both clients hand them over decoded as latin1, so a
+  // CMS that redirects to an unencoded Cyrillic slug produces mojibake. Passing that
+  // straight to `new URL` percent-encodes the mojibake — %C3%91%C2%81 where the server
+  // meant %D1%81 — and the second request 404s. undici does the recovery itself when it
+  // follows redirects internally; following them by hand has to do it too, or this is a
+  // step backwards from `redirect: 'follow'`.
+  const seen = [];
+  await withServer(
+    (req, res) => {
+      seen.push(req.url);
+      if (req.url === '/') {
+        res.socket.write(
+          Buffer.concat([
+            Buffer.from('HTTP/1.1 302 Found\r\nLocation: ', 'latin1'),
+            Buffer.from('/статья', 'utf8'),
+            Buffer.from('\r\nContent-Length: 0\r\nConnection: close\r\n\r\n', 'latin1'),
+          ]),
+        );
+        res.socket.end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(PAGE(FULL_BODY));
+    },
+    async (base) => {
+      const page = await fetchPage(`${base}/`);
+      assert.deepEqual(seen, ['/', '/%D1%81%D1%82%D0%B0%D1%82%D1%8C%D1%8F']);
+      assert.ok(page.url.endsWith('/%D1%81%D1%82%D0%B0%D1%82%D1%8C%D1%8F'), page.url);
+    },
+  );
+});
