@@ -643,6 +643,25 @@ const placeholderAsLabel: Rule = {
   },
 };
 
+
+/**
+ * Which radio group a nameless radio would have belonged to, keyed by the offset of the
+ * element that scopes it.
+ *
+ * Nearest `<fieldset>` first, then `<form>`, then the file — the same order a person
+ * reads the markup in. It is an approximation in one known way: an input can be attached
+ * to a form elsewhere in the document with `form="id"`, and that is not followed here.
+ * A control with no `name` almost never carries a `form` attribute either, and the cost
+ * of being wrong is only the wording of one advisory finding.
+ */
+function groupScope(el: Element): number {
+  let form = -1;
+  for (let p = el.parent; p !== null; p = p.parent) {
+    if (p.tagLower === 'fieldset') return p.openStart;
+    if (p.tagLower === 'form' && form === -1) form = p.openStart;
+  }
+  return form;
+}
 // ---------------------------------------------------------------------------
 // A11Y-FORM-003 — checkbox / radio with no name attribute
 // ---------------------------------------------------------------------------
@@ -651,11 +670,12 @@ const checkableWithoutName: Rule = {
   id: 'A11Y-FORM-003',
   title: 'Checkbox or radio has no name attribute',
   // Listed here as the union of what the rule can cite; each finding carries only the
-  // half that applies to it. A radio group with no shared name really is 1.3.1: the
-  // grouping relationship stops being programmatically determinable, and assistive
-  // technology announces four isolated controls instead of "1 of 4". A lone checkbox
-  // with no name submits nothing — a bug in the form, with no barrier behind it and no
-  // criterion to cite.
+  // part that applies to it. Radios that should have been one group really are 1.3.1:
+  // the grouping relationship stops being programmatically determinable, and assistive
+  // technology announces isolated controls instead of "1 of 4". A lone checkbox with no
+  // name submits nothing — a bug in the form, with no barrier behind it and no criterion
+  // to cite. And a *single* nameless radio is the same kind of bug: there is no group for
+  // the missing name to have broken, so it is reported without a criterion too.
   wcag: ['1.3.1'],
   level: 'A',
   severity: 'warning',
@@ -664,6 +684,7 @@ const checkableWithoutName: Rule = {
   run(ctx) {
     const out: Violation[] = [];
 
+    const flagged: { el: Element; type: string; scope: number }[] = [];
     for (const el of ctx.markup.elements) {
       if (!isHtmlTag(el) || el.tagLower !== 'input') continue;
       const t = inputType(el);
@@ -673,30 +694,48 @@ const checkableWithoutName: Rule = {
       // React's controlled inputs manage state without `name`; only flag radios there,
       // where the missing name breaks grouping regardless of how state is handled.
       if (t === 'checkbox' && findAttr(el, 'checked') !== undefined) continue;
+      flagged.push({ el, type: t, scope: groupScope(el) });
+    }
 
+    // How many other nameless radios could have belonged to the same group. One radio on
+    // its own has nothing to be grouped *with*, and calling that a 1.3.1 failure would be
+    // citing a relationship that was never there — so the criterion, the plural wording
+    // and the "1 of 4" example are all held back until a second one shows up in scope.
+    const perScope = new Map<number, number>();
+    for (const f of flagged) {
+      if (f.type !== 'radio') continue;
+      perScope.set(f.scope, (perScope.get(f.scope) ?? 0) + 1);
+    }
+
+    for (const { el, type: t, scope } of flagged) {
       const isRadio = t === 'radio';
+      const inGroup = isRadio && (perScope.get(scope) ?? 0) > 1;
       out.push(
         ctx.report({
           ruleId: checkableWithoutName.id,
-          wcag: isRadio ? ['1.3.1'] : [],
+          wcag: inGroup ? ['1.3.1'] : [],
           level: 'A',
           severity: 'warning',
           start: el.openStart,
           end: el.openEnd,
           message: `<input type="${t}"> has no name attribute.`,
-          impact: isRadio
+          impact: inGroup
             ? 'Without a shared name these radios are not a group: assistive technology announces ' +
               'each one as an isolated control instead of "1 of 4", arrow keys do not move between ' +
               'them, and more than one can be selected at once.'
-            : 'The checkbox has no name, so its state is never submitted with the form and it is ' +
-              'not associated with any other checkboxes in the same question.',
+            : isRadio
+              ? 'The radio has no name, so its value is never submitted with the form. It is the ' +
+                'only nameless radio here, so nothing is being grouped wrongly yet — but a radio ' +
+                'that answers a question on its own is usually a checkbox.'
+              : 'The checkbox has no name, so its state is never submitted with the form and it is ' +
+                'not associated with any other checkboxes in the same question.',
           fix: {
             safety: 'manual',
             edits: [],
-            description: isRadio
+            description: inGroup
               ? 'Give every radio in this question the same name attribute.'
-              : 'Give the checkbox a name attribute.',
-            advisory: isRadio
+              : 'Give the ' + t + ' a name attribute.',
+            advisory: inGroup
               ? 'Set name="…" to the same value on every radio that answers this question. We ' +
                 'cannot pick the value: it is the field name your form handler expects.'
               : 'Set name="…" to the field name your form handler expects.',

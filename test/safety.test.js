@@ -495,10 +495,11 @@ const doc = (body) =>
   body +
   '</main></body></html>';
 
+const report = (source, ruleId) =>
+  run('t.html', doc(source)).violations.filter((v) => v.ruleId === ruleId);
+
 const cite = (source, ruleId) =>
-  run('t.html', doc(source))
-    .violations.filter((v) => v.ruleId === ruleId)
-    .map((v) => ({ severity: v.severity, wcag: [...v.wcag] }));
+  report(source, ruleId).map((v) => ({ severity: v.severity, wcag: [...v.wcag] }));
 
 test('a duplicate id is a WCAG failure only when something resolves it', () => {
   // 4.1.1 Parsing, which used to cover duplicate ids outright, was removed in WCAG 2.2.
@@ -533,6 +534,31 @@ test('a radio group without a name is 1.3.1; a checkbox without one is not', () 
     cite('<form><input type="checkbox" id="c"><label for="c">x</label></form>', 'A11Y-FORM-003'),
     [{ severity: 'warning', wcag: [] }],
   );
+});
+
+test('one radio on its own has no group to have broken, and cites nothing', () => {
+  // The claim has to be true of the finding, not of the rule: a single nameless radio
+  // was citing 1.3.1 under an impact line reading "these radios ... instead of 1 of 4",
+  // which is a criterion asserted about a relationship that does not exist and plural
+  // text about one control. It is still reported — the value is never submitted — just
+  // not as a conformance failure.
+  assert.deepEqual(cite('<form><input type="radio"></form>', 'A11Y-FORM-003'), [
+    { severity: 'warning', wcag: [] },
+  ]);
+
+  // Scope is the enclosing fieldset, then the form. Two radios in one fieldset are the
+  // group; a third outside it answers a different question and is on its own.
+  const scoped = report(
+    '<form><fieldset><input type="radio"><input type="radio"></fieldset>' +
+      '<input type="radio"></form>',
+    'A11Y-FORM-003',
+  );
+  assert.deepEqual(
+    scoped.map((v) => v.wcag),
+    [['1.3.1'], ['1.3.1'], []],
+  );
+  assert.ok(scoped[0].impact.includes('these radios'), scoped[0].impact);
+  assert.ok(scoped[2].impact.startsWith('The radio has no name'), scoped[2].impact);
 });
 
 test('captions are 1.2.2 for video and 1.2.1 for audio-only', () => {

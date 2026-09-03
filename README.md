@@ -92,14 +92,19 @@ exception is `A11Y-TODO-001`, which is not about the page at all: it reports a p
 this tool itself wrote, and it is an error precisely so that an unfinished fix cannot pass
 as a finished one. [docs/coverage.md](docs/coverage.md) says which rule is which.
 
-Three rules cite a criterion for some of their findings and none for others, because the
-answer genuinely depends on the page: a duplicate `id` breaks 1.3.1 and 4.1.2 when an
-`aria-labelledby` or a `<label for>` resolves to it and is only a bug when nothing does.
+Three rules decide their criterion per finding rather than once, because the answer
+genuinely depends on the page. Two of them cite one for some findings and none for
+others: a duplicate `id` breaks 1.3.1 and 4.1.2 when an `aria-labelledby` or a
+`<label for>` resolves to it, and is only a bug when nothing does; radios with no shared
+`name` break 1.3.1 when there are two of them to have been a group, and a single one is
+just a field that submits nothing. The third picks *between* two — a `<video>` with no
+captions is 1.2.2, an `<audio>` element is 1.2.1, and they are not the same criterion.
 The finding says which it is; the coverage table lists what a rule can cite.
 
-One of those 11 is different in kind from the rest. A11Y-DOC-016 reports an accessibility
-overlay — accessiBe, UserWay, AudioEye, or the `bvi.js` «версия для слабовидящих» switch
-that is the usual answer to ГОСТ Р 52872-2019 — and says, as `info` and without asking
+One of the twelve unanchored rules is different in kind from the rest. A11Y-DOC-016
+reports an accessibility overlay — accessiBe, UserWay, AudioEye, or the `bvi.js`
+«версия для слабовидящих» switch that is the usual answer to ГОСТ Р 52872-2019 — and
+says, as `info` and without asking
 you to remove anything, what it does not change: an image with no `alt` has no `alt` at
 any font size. On nine live Russian institutional sites, three carried a switch and all
 three had images with no alternative text behind it. See [the field

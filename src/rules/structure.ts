@@ -740,6 +740,9 @@ const IDREF_ATTRS: ReadonlySet<string> = new Set([
   'headers',
   'list',
   'form',
+  // A popover invoker resolves its target the same way and stops at the first match, so a
+  // duplicated popover id fails in the same shape as a duplicated aria-controls target.
+  'popovertarget',
 ]);
 
 /** Every id this document resolves through one of those attributes. */
@@ -751,9 +754,14 @@ function referencedIds(ctx: RuleContext): ReadonlySet<string> {
       if (!IDREF_ATTRS.has(name)) continue;
       const value = a.value;
       // A computed reference may well point here. We cannot read it, so we do not get to
-      // claim that it does not.
+      // claim that it does not — and, just as much, we do not get to claim that it does.
+      // The parser strips the braces from `aria-labelledby={q}`, leaving the bare text
+      // `q`, which looksInterpolated then reports as an ordinary literal. Reading it that
+      // way decided a finding's severity and its criterion by whether a variable happened
+      // to be spelled the same as an id somewhere else in the file.
+      if (a.dynamic === true || a.quote === '{') continue;
       if (value === null || looksInterpolated(value)) continue;
-      for (const token of value.trim().split(/s+/)) {
+      for (const token of value.trim().split(/\s+/)) {
         if (token !== '') out.add(token);
       }
     }
