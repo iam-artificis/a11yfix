@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.1.1 — 2026-09-03
+
+A security release. 0.1.0 followed redirects with `redirect: 'follow'`, which does the
+following inside undici where there is no hook to refuse a hop — so a public page could
+send a scan into the network the scan was run from, and the result came back in the
+report. Upgrade if you ever point this tool at a URL somebody else gave you.
+
+- **A scan that starts on the public internet is refused when a redirect would take it
+  into a private network.** Redirects are followed here rather than by `fetch`, and each
+  hop's host is resolved before it is judged — `127.0.0.1.nip.io` is a public name
+  pointing at loopback and anyone can register another. A scan that starts private is
+  your own network already and follows its redirects normally, so
+  `a11yfix http://localhost:3000` is unaffected.
+- **Addresses are classified by their bytes, not by how they are spelled.**
+  `http://[::ffff:127.0.0.1]/` is normalised by `new URL` to `[::ffff:7f00:1]`, and the
+  text-matching check this replaces read that as public. IPv4-mapped and IPv4-compatible
+  IPv6, NAT64, unique-local, link-local and site-local are all covered.
+- **A sitemap index may only name child sitemaps on the origin it came from.** It was the
+  shortest path in the tool from "scan my site" to a request against `169.254.169.254`
+  with the reply parsed and reflected into the report — page URLs were filtered to the
+  origin, the child sitemaps naming them were not.
+- **The redirect timeout is one budget for the whole chain**, not one per hop, and the
+  cap is 10 rather than 5 — the number browsers use.
+- A `Location` header carrying raw UTF-8 resolves to the path the server meant.
+  Header bytes arrive decoded as latin1, and passing that to `new URL` percent-encodes
+  the mojibake: `%C3%91%C2%81` where the server meant `%D1%81`. undici does this
+  recovery internally, so following redirects by hand had to do it too.
+- `SECURITY.md` states the limit of the guarantee rather than glossing it: the address is
+  resolved to decide and resolved again to connect, and pinning the two together needs a
+  custom undici dispatcher that zero runtime dependencies rules out.
+
+Four criteria that did not fit the finding they were attached to. Each was a citation of
+the standard's authority for a claim the standard does not make, and the reader most
+likely to check is the one holding a conformance obligation:
+
+- `A11Y-DOC-006` cites 1.3.1 and 4.1.2 for a duplicate `id` only when an
+  `aria-labelledby`, a `<label for>` or one of eleven other IDREF attributes resolves to
+  it. 4.1.1 Parsing, which covered it outright, was removed in WCAG 2.2.
+- `A11Y-FORM-003` cites 1.3.1 when two radios without a shared `name` could have been a
+  group. A single one has no group to have broken, and now reads as the field bug it is.
+- `A11Y-IMG-008` cites 1.2.2 for `<video>` and 1.2.1 for `<audio>`, rather than both for
+  both: audio-only wants a transcript, not captions, which is what its own advice said
+  while it cited the wrong criterion beside it.
+- `A11Y-LINK-008` cites nothing. 2.4.4 Link Purpose is about whether the link text says
+  where it goes; a link whose text is perfect and whose target does not exist passes it.
+
+Publishing now runs from CI under npm trusted publishing: the registry authenticates the
+workflow by the OIDC identity GitHub mints for it, so there is no token in this
+repository to rotate or to leak.
+
+Also: `--fix` no longer crashes on a colour named after a prototype member
+(`background: constructor`), a file the parser cannot read is a finding about that file
+instead of the end of the run, and the CLI sets `process.exitCode` rather than calling
+`process.exit`, which on Windows could abort the process before stdout was flushed.
+
 ## 0.1.0 — 2026-09-03
 
 First release.

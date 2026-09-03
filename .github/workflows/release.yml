@@ -59,7 +59,16 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+          # Writes the .npmrc that points at the public registry. It also writes an auth
+          # line reading NODE_AUTH_TOKEN, which is empty here and is meant to be: npm own
+          # documented trusted-publishing example keeps registry-url for exactly this
+          # shape, and a current npm falls through to OIDC rather than to the empty token.
           registry-url: https://registry.npmjs.org
+          # Off deliberately, and not because it is on today: caching engages only when
+          # package.json declares packageManager or devEngines.packageManager, and this one
+          # declares neither. Adding either later would silently turn it on, and a release
+          # is the one build that must come from the registry rather than from a cache.
+          package-manager-cache: false
       - run: npm ci
       # prepublishOnly builds, but building here as well means a failure is attributed to
       # the build rather than to the publish.
@@ -93,9 +102,12 @@ jobs:
       # filename, release.yml. Renaming this file stops publishing working until the npm
       # side is renamed with it, which is worth knowing before you tidy up.
       #
-      # `--provenance` is deliberately absent: under trusted publishing the attestation is
-      # produced automatically, and passing the flag on top of that is how a release you
-      # are already halfway through fails on an argument error.
+      # `--provenance` is deliberately absent, and not because the flag is rejected —
+      # it is redundant here and quietly worse. npm attaches provenance by itself under
+      # trusted publishing *while the setting is at its default*; passing the flag
+      # explicitly opts out of that automatic path and into the caller's, which is the
+      # one thing that could make a future npm produce no attestation at all. The
+      # published result is checked with `npm audit signatures`, not assumed.
       - name: Publish to npm
         run: npm publish --access public
 
@@ -138,8 +150,19 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      # Only this version's section, not the whole file. `--notes-file CHANGELOG.md` put
+      # every release ever made into the notes of each one, which grows without bound and
+      # buries what actually changed. awk takes the text from the first `## ` heading up
+      # to the second; the guard is there because an empty notes file is the failure mode
+      # you would not notice until someone read the release page.
       - name: Draft the release from the changelog
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --title "$TAG" --notes-file CHANGELOG.md --verify-tag
+        run: |
+          awk '/^## /{ n++ } n == 1 { print } n > 1 { exit }' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::no section found in CHANGELOG.md for $TAG"
+            exit 1
+          fi
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
