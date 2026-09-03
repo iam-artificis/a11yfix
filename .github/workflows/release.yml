@@ -1,8 +1,9 @@
 name: Release
 
 # Publishing runs from CI rather than from a laptop for one reason that is not
-# convenience: npm provenance is minted from a GitHub OIDC token, so a package published
-# by hand carries no attestation at all and the flag silently does nothing.
+# convenience: the registry authenticates this workflow by the OIDC identity GitHub mints
+# for it. There is no npm token in this repository — nothing to rotate, nothing to leak,
+# and nothing a stolen laptop can publish with.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
@@ -50,7 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Mints the OIDC token provenance is built from. Without it `--provenance` fails.
+      # The whole credential. npm exchanges this short-lived token for publish rights,
+      # which is why there is no secret anywhere in this file.
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -62,27 +64,40 @@ jobs:
       # prepublishOnly builds, but building here as well means a failure is attributed to
       # the build rather than to the publish.
       - run: npm run build
-      # A missing secret otherwise surfaces as a 401 from the registry, which reads like
-      # the package name is taken rather than like nobody has added the token yet.
-      - name: The publish token is configured
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing needs npm 11.5.1 or newer. Checked rather than assumed: an
+      # older npm skips the OIDC exchange and goes looking for a token that is
+      # deliberately not here any more, and what it then prints is about credentials
+      # rather than about the version, which sends you looking in the wrong place.
+      #
+      # Compared in node rather than in the shell: `sort -V` wants a two-line string, and
+      # a release workflow is a bad place to discover that an escape did not survive.
+      - name: npm is new enough for trusted publishing
         run: |
-          if [ -z "${NPM_TOKEN}" ]; then
-            echo "::error::NPM_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-          echo "token present"
-
-      # Once 0.1.0 exists on the registry, this can move to npm trusted publishing: set
-      # this repository and this workflow filename as a trusted publisher on npmjs.com,
-      # then drop NODE_AUTH_TOKEN and the --provenance flag, which becomes automatic. It
-      # cannot be set up first, because npm configures trusted publishers per package and
-      # the package has to exist to have settings.
-      - name: Publish to npm with provenance
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          node -e "
+            const NEED = [11, 5, 1];
+            const version = process.argv[1];
+            const have = version.split('.').map((p) => parseInt(p, 10) || 0);
+            let older = false;
+            for (let i = 0; i < NEED.length; i++) {
+              const h = have[i] ?? 0;
+              if (h > NEED[i]) break;
+              if (h < NEED[i]) { older = true; break; }
+            }
+            if (older) {
+              console.error('::error::npm ' + version + ' is too old for trusted publishing; need 11.5.1 or newer.');
+              process.exit(1);
+            }
+            console.log('npm ' + version);
+          " "$(npm --version)"
+      # The trusted publisher configured on npmjs.com names this repository AND this
+      # filename, release.yml. Renaming this file stops publishing working until the npm
+      # side is renamed with it, which is worth knowing before you tidy up.
+      #
+      # `--provenance` is deliberately absent: under trusted publishing the attestation is
+      # produced automatically, and passing the flag on top of that is how a release you
+      # are already halfway through fails on an argument error.
+      - name: Publish to npm
+        run: npm publish --access public
 
   # `uses: iam-artificis/a11yfix@v1` has to keep resolving, and it must never point at a
   # commit whose npm package does not exist yet — the action shells out to
