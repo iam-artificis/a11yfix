@@ -25,7 +25,15 @@ import { connect as tlsConnect, rootCertificates } from 'node:tls';
 import { request as httpsRequest } from 'node:https';
 import { get as httpGet } from 'node:http';
 import { X509Certificate } from 'node:crypto';
+import { isIP } from 'node:net';
+import { lookup as dnsLookupCb } from 'node:dns';
+import { promisify } from 'node:util';
 import { parseMarkup } from './parse/markup.js';
+
+const dnsLookup = promisify(dnsLookupCb) as (
+  hostname: string,
+  options: { all: true; verbatim: boolean },
+) => Promise<{ address: string; family: number }[]>;
 
 /** A page is not worth reading past this; a stylesheet even less so. */
 const MAX_HTML_BYTES = 8 * 1024 * 1024;
@@ -113,7 +121,16 @@ function readable(err: unknown): string {
 
 /** A certificate is a few kilobytes. Anything of this size is not one. */
 const MAX_CERT_BYTES = 64 * 1024;
-const MAX_REDIRECTS = 5;
+/**
+ * How many redirects a request will follow before giving up.
+ *
+ * Raised from five when this stopped being the chain-repair path's private business and
+ * became the page path too. Five is a plausible number of hops for a real site — http to
+ * https, bare to www, a locale prefix, a trailing slash, an index page — and undici, which
+ * used to do this, allows twenty. Cutting it to five would have been a regression bought
+ * with nothing: what protects here is refusing the hop, not counting them.
+ */
+const MAX_REDIRECTS = 10;
 
 /** Intermediates already fetched, by host, so a fifty-page scan pays for this once. */
 const repairedChains = new Map<string, readonly string[]>();
@@ -271,39 +288,93 @@ export function signedByKnownRoot(cert: X509Certificate): boolean {
 }
 
 /**
- * An address a certificate named, and whether we are willing to fetch it.
+ * Whether a resolved address belongs to this machine, this network, or nowhere.
  *
- * The AIA address is the one place in this file where a remote party chooses, in full,
- * where the tool makes a request — and it does so from a certificate that has not been
- * verified yet. Refusing the obvious internal targets costs nothing.
+ * Exported, with the two below it, for the tests: the public-to-private case cannot be
+ * reached end to end from a test suite — it needs a genuinely public host that redirects
+ * inward — so the decision itself is what gets asserted.
  *
- * This checks literals only. A hostname that resolves into a private range still gets
- * through, and closing that needs per-hop address validation on every fetch this file
- * makes, which is a larger change than this one. Said plainly rather than left implied:
- * the guarantee here is "not trivially pointed at your own network", not "not pointed at
- * your own network".
+ * The list is the usual one plus 169.254.0.0/16, which is not there for link-local
+ * addressing: 169.254.169.254 is the cloud instance-metadata service on every major
+ * provider, and it answers over plain http with credentials.
  */
-function isFetchableAddress(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost')) return false;
-  if (host === '::1' || host === '::' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
-    return false;
-  }
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+export function isPrivateIp(ip: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (v4 !== null) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    if (a === 127 || a === 0 || a === 10 || a >= 224) return false;
-    if (a === 169 && b === 254) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true;
+    if (a >= 224) return true;
+    return false;
   }
-  return true;
+  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0] ?? '';
+  // ::ffff:127.0.0.1 is a loopback address wearing a v6 hat.
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(v6);
+  if (mapped !== null) return isPrivateIp(mapped[1] as string);
+  if (v6 === '::1' || v6 === '::') return true;
+  if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) {
+    return true;
+  }
+  if (/^f[cd]/.test(v6)) return true;
+  if (v6.startsWith('ff')) return true;
+  return false;
+}
+
+/**
+ * Whether a hostname lands anywhere inside your own network.
+ *
+ * Resolved rather than pattern-matched, because the interesting cases are not written as
+ * literals: `127.0.0.1.nip.io` is a public hostname and a loopback address, and any name
+ * an attacker controls can be pointed at one. Every address the name resolves to has to
+ * be public, not just the first — a name with one public A record and one private one
+ * would otherwise pass and then connect to whichever came back.
+ *
+ * Unresolvable is treated as private. It is the safe direction: the request is about to
+ * fail anyway, and answering "public" for a name we could not look up would make this
+ * check bypassable by breaking DNS at the right moment.
+ */
+export async function resolvesPrivate(hostname: string): Promise<boolean> {
+  const bare = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(bare) !== 0) return isPrivateIp(bare);
+  if (bare === 'localhost' || bare.endsWith('.localhost')) return true;
+  try {
+    const found = await dnsLookup(bare, { all: true, verbatim: true });
+    if (found.length === 0) return true;
+    return found.some((a) => isPrivateIp(a.address));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * A redirect must not carry a scan from the public internet into your network.
+ *
+ * Deliberately not a blanket ban on private addresses: `a11yfix http://localhost:3000` is
+ * an ordinary thing to do while building a site, and refusing it would be a check that
+ * makes the tool worse at its job. What is refused is the case where the address stopped
+ * being the operator's choice — a URL somebody sent you, redirecting to 169.254.169.254
+ * or into an intranet, with the result landing in a report you email back to them.
+ *
+ * So the rule is about the boundary, not the destination: a chain that starts public
+ * stays public, and one that starts private is your own network already.
+ */
+export async function refuseCrossingInward(
+  from: URL,
+  to: URL,
+  startedPublic: boolean,
+): Promise<void> {
+  if (!startedPublic) return;
+  if (!(await resolvesPrivate(to.hostname))) return;
+  throw new Error(
+    `refused to follow a redirect from ${from.origin} to ${to.origin}: that address is ` +
+      `inside a private network, and a page you scan does not get to choose what this ` +
+      `tool connects to. Scan the internal address directly if that is what you meant.`,
+  );
 }
 
 /**
@@ -346,7 +417,19 @@ async function walkToKnownRoot(host: string, port: number): Promise<readonly str
   let url = await issuerUrl(host, port);
   while (url !== undefined && pems.length < MAX_CHAIN_FETCHES && !seen.has(url)) {
     seen.add(url);
-    if (!isFetchableAddress(url)) return [];
+    // The AIA address is the one place in this file a remote party chooses in full, from
+    // a certificate nobody has verified yet, so it is held to the strict rule rather than
+    // the boundary rule the page fetch uses: always public, whatever is being scanned.
+    // An internal host with an incomplete chain is not a case worth opening this for —
+    // its issuer is an internal CA that Node does not trust either, so the repair would
+    // fail one step later anyway.
+    let issuer: URL;
+    try {
+      issuer = new URL(url);
+    } catch {
+      return [];
+    }
+    if (await resolvesPrivate(issuer.hostname)) return [];
     const cert = await downloadCertificate(url);
     if (cert === undefined) return [];
     if (isSelfSigned(cert)) return [];
@@ -370,6 +453,11 @@ function getWithCa(
   ca: readonly string[],
   limit: number,
   redirectsLeft = MAX_REDIRECTS,
+  // Carried through the recursion rather than recomputed per hop: the question is where
+  // the chain *started*, and recomputing it would answer a different one — after the
+  // first inward hop the origin would look private and every hop after it would pass.
+  origin: URL = new URL(url),
+  startedPublic = true,
 ): Promise<{ buffer: Buffer; type: string; final: string }> {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
@@ -401,7 +489,26 @@ function getWithCa(
             reject(new Error('too many redirects'));
             return;
           }
-          resolve(getWithCa(new URL(location, url).href, ca, limit, redirectsLeft - 1));
+          // The same boundary the ordinary path enforces. This one is easy to forget
+          // because it is only reached after a chain repair, which is exactly the path a
+          // server that is misbehaving on purpose would send you down.
+          let next: URL;
+          try {
+            next = new URL(location, url);
+          } catch {
+            reject(new Error(`redirected to an address that is not a URL: ${location}`));
+            return;
+          }
+          if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+            reject(new Error(`refused to follow a redirect to ${next.protocol}//`));
+            return;
+          }
+          resolve(
+            (async () => {
+              await refuseCrossingInward(origin, next, startedPublic);
+              return getWithCa(next.href, ca, limit, redirectsLeft - 1, origin, startedPublic);
+            })(),
+          );
           return;
         }
         if (status < 200 || status >= 300) {
@@ -456,7 +563,8 @@ async function retryWithCompletedChain(
   );
   if (pems.length === 0) return undefined;
   try {
-    return await getWithCa(url, [...rootCertificates, ...pems], limit);
+    const startedPublic = !(await resolvesPrivate(target.hostname));
+    return await getWithCa(url, [...rootCertificates, ...pems], limit, MAX_REDIRECTS, target, startedPublic);
   } catch {
     return undefined;
   }
@@ -481,11 +589,37 @@ async function get(url: string, limit: number): Promise<Fetched> {
   let chainRepaired = false;
 
   try {
-    const response = await fetch(url, {
-      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    // Redirects are followed here rather than by `fetch`, because following them is the
+    // only moment this tool decides to connect somewhere nobody asked it to. `redirect:
+    // 'follow'` does it inside undici, where there is no hook to refuse a hop.
+    const origin = new URL(url);
+    const startedPublic = !(await resolvesPrivate(origin.hostname));
+    let current = origin;
+    let response: Response;
+    for (let hop = 0; ; hop++) {
+      response = await fetch(current.href, {
+        headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,text/css,*/*' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      const location = response.headers.get('location');
+      const isRedirect = response.status >= 300 && response.status < 400 && location !== null;
+      if (!isRedirect) break;
+      await response.body?.cancel();
+      if (hop >= MAX_REDIRECTS) throw new Error('too many redirects');
+      let next: URL;
+      try {
+        next = new URL(location, current);
+      } catch {
+        throw new Error(`redirected to an address that is not a URL: ${location}`);
+      }
+      // A redirect to file:, data: or anything else is not a redirect this tool follows.
+      if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+        throw new Error(`refused to follow a redirect to ${next.protocol}//`);
+      }
+      await refuseCrossingInward(origin, next, startedPublic);
+      current = next;
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} ${response.statusText}`.trimEnd());
     }
@@ -501,7 +635,9 @@ async function get(url: string, limit: number): Promise<Fetched> {
     if (read.byteLength > limit) throw tooBig(read.byteLength);
     buffer = new Uint8Array(read);
     type = response.headers.get('content-type') ?? '';
-    final = response.url === '' ? url : response.url;
+    // The loop above tracked it; response.url is only the last request under manual
+    // redirects, which happens to be the same thing, but saying so is not free.
+    final = current.href;
   } catch (err) {
     // The server forgot its intermediate certificate. Browsers fetch it and carry on;
     // so do we, once, and then verify the completed chain in full. Any other failure —

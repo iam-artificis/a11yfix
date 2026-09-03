@@ -23,20 +23,28 @@ content it did not compute from your own source, is the most serious class of bu
 project can have.
 
 **It fetches URLs you give it.** `a11yfix https://example.ru/` retrieves the page and the
-stylesheets it links from its own origin. Two known limits, stated rather than implied:
+stylesheets it links from its own origin, and follows redirects itself rather than letting
+`fetch` do it — because following a redirect is the only moment the tool connects
+somewhere nobody asked it to.
 
-- **Redirects are followed without re-checking where they lead.** A URL you were sent by
-  someone else can redirect into your own network, and the resulting report can contain
-  paths and file names from it. If you scan a URL a stranger supplied and then send the
-  report back to them, read it first.
-- **The scheme is checked; the address is not.** Only `http` and `https` are accepted, but
-  nothing refuses a hostname that resolves inside your network. The one exception is the
-  certificate-authority address described below, which does refuse the obvious internal
-  literals.
+The rule is about the boundary, not the destination. **A scan that starts on the public
+internet is never redirected into a private network**: loopback, link-local — including
+`169.254.169.254`, the cloud metadata service — RFC1918, carrier-grade NAT, unique-local
+and multicast are all refused as a redirect target, and the hostname is *resolved* before
+it is judged, because `127.0.0.1.nip.io` is a public name pointing at loopback and anyone
+can register another. A redirect out of `http`/`https` is refused outright.
 
-Neither is remotely exploitable — this is a command-line tool, not a service, and whoever
-gives you the URL never sees the response. Both are on the list to fix properly, with
-per-hop address validation.
+A scan that starts private is your own network already, so `a11yfix http://localhost:3000`
+works and follows its redirects normally. Refusing that would be a security check that
+makes the tool worse at the thing it is for.
+
+The address a certificate names for its issuer is held to the stricter rule — always
+public, whatever is being scanned — because that address is chosen entirely by the remote
+party, from a certificate that has not been verified yet.
+
+What this does not do is stop *you* pointing it at your own network on purpose, and it
+never will: that is a legitimate scan, and the report will contain internal paths. If you
+scanned a URL somebody else supplied, read the report before you send it back.
 
 **What it will not do:** run JavaScript from a page it fetched, execute anything from your
 source, evaluate a config file as code, or run an install-time script. It has zero runtime

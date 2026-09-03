@@ -17,6 +17,9 @@ import {
   caIssuersFrom,
   isSelfSigned,
   signedByKnownRoot,
+  isPrivateIp,
+  resolvesPrivate,
+  refuseCrossingInward,
 } from '../dist/fetch.js';
 
 /**
@@ -671,4 +674,135 @@ test('a certificate is only trusted when a root already in the store signed it',
   assert.equal(signedByKnownRoot(new X509Certificate(UNTRUSTED_ROOT)), false);
   // A root in Node's store is signed by a root in Node's store: itself.
   assert.equal(signedByKnownRoot(new X509Certificate(rootCertificates[0])), true);
+});
+
+/**
+ * Following a redirect is the only moment this tool connects somewhere nobody asked it
+ * to, and the README's own workflow is what makes that matter: an agency is told to scan
+ * a URL a stranger sent, and to email the resulting report back. A redirect into the
+ * agency's own network turns that report into a disclosure.
+ *
+ * The rule enforced here is about the boundary rather than the destination. A scan that
+ * starts public stays public; a scan that starts private is your own network already, so
+ * `a11yfix http://localhost:3000` keeps working — refusing it would be a security check
+ * that makes the tool worse at its job.
+ *
+ * The public-to-private case cannot be reached from a test suite: it needs a genuinely
+ * public host that redirects inward, and there is not one to hand. So the decision itself
+ * is asserted, and the cases that can be reached are driven through the real fetch.
+ */
+test('an address is classified by what it is, not by how it is spelled', () => {
+  for (const ip of [
+    '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1',
+    '169.254.169.254', '100.64.0.1', '198.18.0.1', '224.0.0.1', '0.0.0.0',
+    '::1', '::', 'fe80::1', 'fd00::1', 'fc00::1', 'ff02::1', '::ffff:127.0.0.1',
+  ]) {
+    assert.equal(isPrivateIp(ip), true, ip + ' should be private');
+  }
+  // The neighbours of each range, which a sloppy check swallows along with it.
+  for (const ip of [
+    '172.15.0.1', '172.32.0.1', '192.167.1.1', '100.128.0.1', '8.8.8.8',
+    '104.20.23.154', '172.66.147.243', '::ffff:8.8.8.8', '2606:4700::1',
+  ]) {
+    assert.equal(isPrivateIp(ip), false, ip + ' should be public');
+  }
+});
+
+test('a hostname is resolved before it is judged', async () => {
+  // The case a pattern match cannot catch, and the reason this does a lookup at all:
+  // 127.0.0.1.nip.io is an ordinary public hostname that resolves to loopback. Anyone
+  // can point a name they own at any address they like.
+  assert.equal(await resolvesPrivate('127.0.0.1.nip.io'), true);
+  assert.equal(await resolvesPrivate('localhost'), true);
+  assert.equal(await resolvesPrivate('127.0.0.1'), true);
+  assert.equal(await resolvesPrivate('[::1]'), true);
+  // A name that does not resolve is treated as private. The request is going to fail
+  // anyway, and answering "public" for a lookup that failed would make the check
+  // bypassable by breaking DNS at the right moment.
+  assert.equal(await resolvesPrivate('nx.invalid'), true);
+});
+
+test('a redirect may not carry a public scan into a private network', async () => {
+  const from = new URL('https://example.ru/');
+  await assert.rejects(
+    () => refuseCrossingInward(from, new URL('http://169.254.169.254/latest/meta-data/'), true),
+    /private network/,
+    'the cloud metadata service is the address this exists for',
+  );
+  await assert.rejects(
+    () => refuseCrossingInward(from, new URL('http://192.168.1.1/'), true),
+    /private network/,
+  );
+  await assert.rejects(
+    () => refuseCrossingInward(from, new URL('http://127.0.0.1.nip.io:8080/'), true),
+    /private network/,
+    'a public hostname resolving inward is the whole point of resolving',
+  );
+  // Public to public is ordinary, and private to anywhere is your own network.
+  await refuseCrossingInward(from, new URL('https://example.com/moved'), true);
+  await refuseCrossingInward(new URL('http://localhost:3000/'), new URL('http://127.0.0.1:9/'), false);
+});
+
+test('a scan that starts on your own machine still follows its own redirects', async () => {
+  // The regression this fix could easily have caused. Running a dev server and pointing
+  // the tool at it is an ordinary thing to do, and it goes through the same code.
+  const html = '<!doctype html><html lang="en"><head><title>t</title></head><body><main><p>ok</p></main></body></html>';
+  await withServer(
+    (req, res) => {
+      if (req.url === '/hop') {
+        res.writeHead(302, { location: '/there' });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(html);
+    },
+    async (base) => {
+      const page = await fetchPage(base + '/hop');
+      assert.match(page.html, /<p>ok<\/p>/);
+      assert.match(page.url, /\/there$/);
+      assert.ok(
+        page.notes.some((n) => n.includes('redirected to')),
+        'a redirect that was followed is still said out loud in the report',
+      );
+    },
+  );
+});
+
+test('a redirect out of http is refused, and a loop ends', async () => {
+  await withServer(
+    (req, res) => {
+      const to = req.url === '/file' ? 'file:///etc/passwd' : '/loop';
+      res.writeHead(302, { location: to });
+      res.end();
+    },
+    async (base) => {
+      await assert.rejects(() => fetchPage(base + '/file'), /refused to follow a redirect to file:/);
+      await assert.rejects(() => fetchPage(base + '/loop'), /too many redirects/);
+    },
+  );
+});
+
+test('the redirect cap is a real bound, and it is not tighter than the web is', async () => {
+  // Following redirects here rather than in undici moved this number from undici's
+  // twenty to ours. A real site can spend several hops on http-to-https, bare-to-www, a
+  // locale prefix and a trailing slash, so the bound is asserted from both sides: the
+  // longest chain that must still work, and the first one that must not.
+  await withServer(
+    (req, res) => {
+      const left = Number(/^\/(\d+)$/.exec(req.url)?.[1] ?? '0');
+      if (left > 0) {
+        res.writeHead(302, { location: '/' + (left - 1) });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<!doctype html><html lang="en"><head><title>t</title></head><body><main><p>ok</p></main></body></html>');
+    },
+    async (base) => {
+      const page = await fetchPage(base + '/10');
+      assert.match(page.html, /<p>ok<\/p>/);
+      await assert.rejects(() => fetchPage(base + '/11'), /too many redirects/);
+    },
+  );
 });

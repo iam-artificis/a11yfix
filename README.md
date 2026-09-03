@@ -285,6 +285,13 @@ Encodings are honoured, including windows-1251, which is still in use on the sit
 mode exists for — a page decoded as the wrong charset would have every text rule
 reporting on mojibake.
 
+Redirects are followed, and one kind is not: **a scan that starts on the public internet
+is never redirected into a private network.** A URL somebody sends you does not get to
+point this tool at `169.254.169.254` or at your intranet and have the result land in a
+report you email back to them. Scanning a private address yourself is unaffected —
+`npx a11yfix http://localhost:3000` works and follows its own redirects — because there
+the address was your choice in the first place.
+
 ### A whole site, from its own sitemap
 
 ```bash
